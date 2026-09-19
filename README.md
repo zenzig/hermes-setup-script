@@ -122,3 +122,7 @@ bash hermes-easy-setup.sh doctor
 - **Slack rejects a token or reports missing scopes:** Check that you used the correct token type, created the app from the generated manifest, and reinstalled it after permission changes. Run `slack` again.
 - **Bot does not reply:** Check `SLACK_ALLOWED_USERS`, the gateway status, and the diagnostics output. A successful setup DM alone does not verify a complete model-backed conversation.
 - **Further details:** Inspect `~/.hermes/easy-setup.log`; it contains selected command output, not a complete transcript.
+
+## License
+
+Licensed under the [MIT License](LICENSE).
