@@ -1,6 +1,7 @@
 #!/bin/bash
 # =============================================================================
 #  hermes-easy-setup.sh  —  guided Hermes Agent + local model + Slack installer
+#  Author: Rich Olson
 #  Target: macOS (Apple Silicon), a user who has never used Terminal.
 #
 #  Usage:   bash hermes-easy-setup.sh            full guided install
@@ -43,7 +44,7 @@ ok()    { echo "  ${G}✔${N} $*"; }
 warn()  { echo "  ${Y}!${N} $*"; }
 bad()   { echo "  ${R}✘${N} $*"; }
 info()  { echo "    $*"; }
-die()   { echo; bad "$*"; echo "    Send Rich the file: $LOG"; exit 1; }
+die()   { echo; bad "$*"; echo "    See the log file: $LOG"; exit 1; }
 pause() { echo; read -r -p "    Press Return when done… " _; }
 ask()   { local a; read -r -p "    $1 " a; echo "$a"; }
 yesno() { local a; read -r -p "    $1 [Y/n] " a; case "$a" in n*|N*) return 1;; *) return 0;; esac; }
@@ -159,7 +160,7 @@ $CATALOGUE
 EOF
   [ $n -eq 0 ] && die "Couldn't reach Hugging Face / Ollama to check models. Is the internet working?"
 
-  if [ "$BACKEND" = lmstudio ]; then   # show what is trending, for Rich's benefit — informational only
+  if [ "$BACKEND" = lmstudio ]; then   # show what is trending — informational only
     info "${C}Newest popular MLX builds on Hugging Face (FYI):${N}"
     curl -s "https://huggingface.co/api/models?author=mlx-community&filter=text-generation&sort=trendingScore&limit=5" \
       | python3 -c "import sys,json

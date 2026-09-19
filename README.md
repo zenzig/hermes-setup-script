@@ -1,6 +1,6 @@
 # Hermes Easy Setup
 
-A guided macOS setup script for Hermes Agent, a local AI model, and Slack—written by **Rich Olson** ([zenzig](https://github.com/zenzig)).
+A guided macOS setup script for Hermes Agent, a local AI model, and Slack.
 
 Designed for Apple Silicon Mac users, including people who are new to Terminal. The script walks you through choosing a model, configuring Ollama or LM Studio, installing Hermes, and connecting a Slack bot.
 
@@ -122,9 +122,3 @@ bash hermes-easy-setup.sh doctor
 - **Slack rejects a token or reports missing scopes:** Check that you used the correct token type, created the app from the generated manifest, and reinstalled it after permission changes. Run `slack` again.
 - **Bot does not reply:** Check `SLACK_ALLOWED_USERS`, the gateway status, and the diagnostics output. A successful setup DM alone does not verify a complete model-backed conversation.
 - **Further details:** Inspect `~/.hermes/easy-setup.log`; it contains selected command output, not a complete transcript.
-
-## Author
-
-**Rich Olson** wrote `hermes-easy-setup.sh`.
-
-GitHub: [@zenzig](https://github.com/zenzig)
