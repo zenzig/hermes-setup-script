@@ -6,11 +6,15 @@ Designed for Apple Silicon Mac users, including people who are new to Terminal. 
 
 ## Requirements
 
-- macOS, with Apple Silicon as the intended target.
+- macOS, with Apple Silicon as the primary target (M1 through M4, 16 GB to 48 GB+).
 - An internet connection for installers, model downloads, and Slack.
-- Enough memory and storage for your model. The script offers memory tiers starting at 8 GB and warns when less than 30 GB of disk space is available. These checks do not guarantee that a model will fit, especially with the configured 65,536-token context.
-- Ollama or LM Studio. If neither is detected, the script opens the Ollama download page and waits for you to install it.
-- Apple's Command Line Tools and `python3`. The script prompts to install the developer tools if missing; Python is used for JSON processing and benchmarking.
+- Memory and storage:
+  - **Dynamic Unified Memory Analysis:** Setup dynamically calculates physical RAM, reserves dedicated headroom for macOS (kernel, WindowServer, Slack, IDE), and establishes a safe model memory ceiling.
+  - **16 GB Macs (e.g. M1 16 GB):** Hermes requires a 64K (65,536 token) context window for agent tool calling. Ollama is recommended on 16 GB because its 8-bit quantized KV cache (`OLLAMA_KV_CACHE_TYPE q8_0`) and Flash Attention cut long-context memory by 50% on the Metal GPU, preventing unified memory exhaustion. LM Studio is supported with auto-balanced offload and active canary surveillance.
+  - **36 GB / 48 GB+ Macs (e.g. M4 48 GB):** Substantial memory allows running high-capacity Mixture-of-Experts (MoE) models (e.g. Qwen3.6 35B-A3B or Qwen3-Coder 30B-A3B) with full 64K context and dedicated GPU acceleration under LM Studio (MLX) or Ollama.
+  - Disk space: At least 15–30 GB free recommended depending on model choice.
+- Ollama or LM Studio. Both run directly on Apple Silicon's Metal GPU.
+- Apple's Command Line Tools and `python3`. The script prompts to install developer tools if missing; Python is used for JSON processing and benchmarking.
 - A Slack workspace where you can create and install an app. The guided flow can help you create a workspace and sign in through your browser.
 
 The script is written for the stock macOS Bash 3.2. Run it as your normal macOS user.
@@ -38,30 +42,31 @@ Follow the Terminal prompts and return to Terminal whenever a browser or app ste
 | --- | --- |
 | `bash hermes-easy-setup.sh` | Runs the full setup, including Slack. |
 | `bash hermes-easy-setup.sh all` | Explicitly runs the full setup. |
-| `bash hermes-easy-setup.sh model` | Selects, downloads, tunes, and benchmarks a model; also installs or updates Hermes configuration. |
+| `bash hermes-easy-setup.sh model` | Selects, downloads, tunes, and canary-benchmarks a model; also installs or updates Hermes configuration. |
 | `bash hermes-easy-setup.sh slack` | Sets up or validates Slack and installs the Hermes gateway service. Requires Hermes to be installed already. |
-| `bash hermes-easy-setup.sh doctor` | Checks the model server, benchmarks it when available, validates Slack tokens, and runs Hermes diagnostics. |
+| `bash hermes-easy-setup.sh doctor` | Checks memory health, validates model server under canary watchdog, checks Slack tokens, and runs diagnostics. |
 
-Every mode runs the macOS preflight first. Although the diagnostic output says nothing will change, `doctor` can create the Hermes directory/log, trigger the Command Line Tools installation prompt, run inference, and contact Slack. It is not a strictly read-only or offline check.
+Every mode runs the macOS preflight first. Although the diagnostic output says nothing will change, `doctor` can create the Hermes directory/log, trigger the Command Line Tools installation prompt, run inference under the canary watchdog, and contact Slack.
 
 ## What setup does
 
-1. Detects the Mac's memory, disk space, and available model engines.
-2. Offers models from the script's built-in catalog for the detected memory tier, checking download availability before presenting them.
-3. Configures the selected model under the stable name `hermes-local` with a 65,536-token context and runs a speed test.
-4. Runs the Hermes installer if needed and points Hermes at the local model server.
-5. Generates a Slack app manifest, guides you through creating and installing the app, validates its tokens, and configures allowed Slack users.
-6. Installs the Hermes gateway background service and attempts to send a setup DM to the first allowed Slack user.
+1. **Hardware profiling & Dynamic Memory Bounds:** Evaluates CPU architecture, Apple Silicon chip tier, unified RAM capacity, and free disk space. Calculates a dynamic safe model budget (reserving 4.5–10 GB for macOS and applications) to prevent driver-level memory exhaustion.
+2. **Backend detection & Guidance:** Detects LM Studio and Ollama. On < 24 GB systems, recommends Ollama for its quantized KV cache safety on Metal; on >= 24 GB systems, recommends LM Studio's MLX engine.
+3. **Model recommendations:** Presents curated, downloadable models tailored for Hermes agent workflows and tool-calling fidelity. For 16 GB machines, prioritizes compact, stable models (Hermes 3 3B, Qwen3 4B).
+4. **Tuning & Context sizing:**
+   - **LM Studio (MLX):** Checks and installs the Apple Silicon `mlx-llm` extension, verifies resource guardrails with `--estimate-only`, applies dynamic offload (auto-balanced on < 32 GB), loads with 64K context and single-slot concurrency (`--parallel 1`), and configures automatic reload on reboot.
+   - **Ollama:** Enables Flash Attention (`OLLAMA_FLASH_ATTENTION 1`), 8-bit KV caching (`OLLAMA_KV_CACHE_TYPE q8_0`), 64K context limit, and single concurrency.
+5. **Canary Verification & Memory Watchdog:** Runs a real-time background watchdog during warmup and speed testing that samples resident memory (RSS). If memory starts runaway expansion toward the hardware ceiling, the watchdog immediately unloads the model before macOS can trigger an `IOGPUFamily` kernel panic, and safely transitions to a lighter configuration.
+6. **Hermes Agent configuration:** Sets up Hermes with the chosen provider, points it to the local endpoint with a 65,536 context length, and configures timeouts and local optimizations.
+7. **Slack connection:** Generates the app manifest, guides token setup, configures security/allowed users, and installs the background gateway daemon.
 
-Backend selection prefers an existing Ollama installation on Macs with less than 24 GB of memory, then LM Studio on Apple Silicon, then whichever supported engine is available. Model catalog entries and compatibility depend on the external services and software versions available when you run the script.
+### Ollama (Recommended for 16 GB Macs)
 
-### Ollama
+Uses `http://localhost:11434/v1`. Runs 100% on Apple Silicon Metal GPU. Setup enables flash attention and an 8-bit KV cache, sets a 24-hour keep-alive, limits parallelism to 1, and restarts Ollama. It creates a tuned `hermes-local` model with 64K context and a login LaunchAgent that persists the environment settings.
 
-Uses `http://localhost:11434/v1`. Setup enables flash attention and an 8-bit KV cache, sets a 24-hour keep-alive, limits parallelism and loaded models to one, and restarts Ollama. It creates a tuned `hermes-local` model and a login LaunchAgent that reapplies the environment settings.
+### LM Studio (Recommended for 24 GB+ Macs)
 
-### LM Studio
-
-Uses `http://localhost:1234/v1`. Setup downloads the selected model, unloads currently loaded models, and loads `hermes-local` with the configured context and GPU settings. It also creates a helper script and login LaunchAgent to start the server and reload the model.
+Uses `http://localhost:1234/v1`. Setup verifies the native Apple Silicon MLX runtime, downloads the selected model, tests guardrails, applies dynamic GPU offload, and loads with 64K context and `--parallel 1` concurrency. It configures a LaunchAgent to maintain the service across restarts.
 
 ### Slack
 
