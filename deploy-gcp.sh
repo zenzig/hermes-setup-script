@@ -25,6 +25,13 @@ IMAGE_FAMILY="ubuntu-2404-lts-amd64"
 IMAGE_PROJECT="ubuntu-os-cloud"
 DEFAULT_ZONE="us-central1-a"
 ZONE="$DEFAULT_ZONE"
+PROVIDER="gemini"
+MODEL_NAME="gemini-2.5-flash"
+GEMINI_KEY=""
+OPENROUTER_KEY=""
+SLACK_BOT=""
+SLACK_APP=""
+SLACK_USER=""
 
 # ------------------------------------------------------------------ helpers --
 B=$'\033[1m'; G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; C=$'\033[36m'; N=$'\033[0m'
@@ -34,12 +41,30 @@ warn()  { echo "  ${Y}!${N} $*"; }
 bad()   { echo "  ${R}✘${N} $*"; }
 info()  { echo "    $*"; }
 die()   { echo; bad "$*"; exit 1; }
-pause() { echo; read -r -p "    Press Return to continue… " _; }
-ask()   { local a; read -r -p "    $1 " a; echo "$a"; }
-yesno() { local a; read -r -p "    $1 [Y/n] " a; case "$a" in n*|N*) return 1;; *) return 0;; esac; }
+pause() {
+  if [ -t 0 ]; then read -r -p "    Press Return to continue… " _ || true
+  elif [ -r /dev/tty ]; then read -r -p "    Press Return to continue… " _ </dev/tty || true
+  fi
+}
+ask() {
+  local a=""
+  if [ -t 0 ]; then read -r -p "    $1 " a || true
+  elif [ -r /dev/tty ]; then read -r -p "    $1 " a </dev/tty || true
+  else read -r -p "    $1 " a || true
+  fi
+  echo "$a"
+}
+yesno() {
+  local a=""
+  if [ -t 0 ]; then read -r -p "    $1 [Y/n] " a || true
+  elif [ -r /dev/tty ]; then read -r -p "    $1 [Y/n] " a </dev/tty || true
+  else read -r -p "    $1 [Y/n] " a || true
+  fi
+  case "$a" in n*|N*) return 1;; *) return 0;; esac
+}
 have()  { command -v "$1" >/dev/null 2>&1; }
 trim()  { echo "$1" | tr -d '[:space:]'; }
-get_local_env() { [ -f "$LOCAL_ENV" ] && grep "^$1=" "$LOCAL_ENV" 2>/dev/null | tail -1 | cut -d= -f2-; }
+get_local_env() { [ -f "$LOCAL_ENV" ] && grep "^$1=" "$LOCAL_ENV" 2>/dev/null | tail -1 | cut -d= -f2- || true; }
 
 # ------------------------------------------------------------ pre-flight & gcloud --
 check_gcloud() {
@@ -207,7 +232,7 @@ gather_credentials() {
   esac
 
   if [ "$PROVIDER" = "gemini" ]; then
-    local local_gkey
+    local local_gkey=""
     local_gkey="$(get_local_env GEMINI_API_KEY)"
     [ -z "$local_gkey" ] && local_gkey="$(get_local_env GOOGLE_API_KEY)"
     if [ -n "$local_gkey" ]; then
@@ -224,7 +249,7 @@ gather_credentials() {
     done
     ok "Gemini API Key ready"
   else
-    local local_orkey
+    local local_orkey=""
     local_orkey="$(get_local_env OPENROUTER_API_KEY)"
     if [ -n "$local_orkey" ]; then
       if yesno "Found OpenRouter API key in local ~/.hermes/.env. Use this key on the cloud VM?"; then
@@ -242,7 +267,7 @@ gather_credentials() {
   fi
 
   # Slack credentials
-  local local_bot local_app local_user
+  local local_bot="" local_app="" local_user=""
   local_bot="$(get_local_env SLACK_BOT_TOKEN)"
   local_app="$(get_local_env SLACK_APP_TOKEN)"
   local_user="$(get_local_env SLACK_ALLOWED_USERS)"
@@ -391,7 +416,7 @@ SKILL_EOF
 EOF
 
   # Append credential injections
-  if [ -n "$GEMINI_KEY" ]; then
+  if [ -n "${GEMINI_KEY:-}" ]; then
     cat >> "$remote_script" <<EOF
 grep -v "^GEMINI_API_KEY=" "\$HOME/.hermes/.env" > "\$HOME/.hermes/.env.tmp" 2>/dev/null || true
 echo "GEMINI_API_KEY=$GEMINI_KEY" >> "\$HOME/.hermes/.env.tmp"
@@ -400,7 +425,7 @@ mv "\$HOME/.hermes/.env.tmp" "\$HOME/.hermes/.env"; chmod 600 "\$HOME/.hermes/.e
 EOF
   fi
 
-  if [ -n "$OPENROUTER_KEY" ]; then
+  if [ -n "${OPENROUTER_KEY:-}" ]; then
     cat >> "$remote_script" <<EOF
 grep -v "^OPENROUTER_API_KEY=" "\$HOME/.hermes/.env" > "\$HOME/.hermes/.env.tmp" 2>/dev/null || true
 echo "OPENROUTER_API_KEY=$OPENROUTER_KEY" >> "\$HOME/.hermes/.env.tmp"
@@ -408,7 +433,7 @@ mv "\$HOME/.hermes/.env.tmp" "\$HOME/.hermes/.env"; chmod 600 "\$HOME/.hermes/.e
 EOF
   fi
 
-  if [ -n "$SLACK_BOT" ]; then
+  if [ -n "${SLACK_BOT:-}" ]; then
     cat >> "$remote_script" <<EOF
 grep -v "^SLACK_BOT_TOKEN=" "\$HOME/.hermes/.env" > "\$HOME/.hermes/.env.tmp" 2>/dev/null || true
 echo "SLACK_BOT_TOKEN=$SLACK_BOT" >> "\$HOME/.hermes/.env.tmp"
@@ -416,7 +441,7 @@ mv "\$HOME/.hermes/.env.tmp" "\$HOME/.hermes/.env"; chmod 600 "\$HOME/.hermes/.e
 EOF
   fi
 
-  if [ -n "$SLACK_APP" ]; then
+  if [ -n "${SLACK_APP:-}" ]; then
     cat >> "$remote_script" <<EOF
 grep -v "^SLACK_APP_TOKEN=" "\$HOME/.hermes/.env" > "\$HOME/.hermes/.env.tmp" 2>/dev/null || true
 echo "SLACK_APP_TOKEN=$SLACK_APP" >> "\$HOME/.hermes/.env.tmp"
@@ -424,7 +449,7 @@ mv "\$HOME/.hermes/.env.tmp" "\$HOME/.hermes/.env"; chmod 600 "\$HOME/.hermes/.e
 EOF
   fi
 
-  if [ -n "$SLACK_USER" ]; then
+  if [ -n "${SLACK_USER:-}" ]; then
     cat >> "$remote_script" <<EOF
 grep -v "^SLACK_ALLOWED_USERS=" "\$HOME/.hermes/.env" > "\$HOME/.hermes/.env.tmp" 2>/dev/null || true
 echo "SLACK_ALLOWED_USERS=$SLACK_USER" >> "\$HOME/.hermes/.env.tmp"
@@ -487,7 +512,7 @@ verify_and_summary() {
   info "  Stop instance:       ${B}gcloud compute instances stop ${INSTANCE_NAME} --zone=${ZONE}${N}"
   info "  Start instance:      ${B}gcloud compute instances start ${INSTANCE_NAME} --zone=${ZONE}${N}"
   echo
-  if [ -n "$SLACK_BOT" ]; then
+  if [ -n "${SLACK_BOT:-}" ]; then
     ok "Slack gateway is active! Test it by sending a DM to your bot in Slack."
   else
     info "To connect Slack, run: ${B}gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE}${N} followed by ${B}hermes slack setup${N}"
