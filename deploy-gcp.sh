@@ -21,7 +21,7 @@ INSTANCE_NAME="hermes-agent-free"
 MACHINE_TYPE="e2-micro"
 DISK_TYPE="pd-standard"
 DISK_SIZE="30GB"
-IMAGE_FAMILY="ubuntu-2404-lts"
+IMAGE_FAMILY="ubuntu-2404-lts-amd64"
 IMAGE_PROJECT="ubuntu-os-cloud"
 DEFAULT_ZONE="us-central1-a"
 ZONE="$DEFAULT_ZONE"
@@ -292,8 +292,9 @@ provision_vm() {
   info "  · Machine:   ${B}${MACHINE_TYPE}${N} (1 GB RAM, 2 vCPUs, \$0.00/mo)"
   info "  · Boot Disk: ${B}${DISK_SIZE} ${DISK_TYPE}${N} (Standard Persistent Disk, \$0.00/mo)"
   info "  · Zone:      ${B}${ZONE}${N}"
-  info "  · OS Image:  ${B}Ubuntu 24.04 LTS${N}"
+  info "  · OS Image:  ${B}Ubuntu LTS (Always-Free)${N}"
 
+  local create_res=0
   gcloud compute instances create "$INSTANCE_NAME" \
     --zone="$ZONE" \
     --machine-type="$MACHINE_TYPE" \
@@ -302,7 +303,20 @@ provision_vm() {
     --image-family="$IMAGE_FAMILY" \
     --image-project="$IMAGE_PROJECT" \
     --tags=hermes-agent \
-    --quiet || die "Failed to create Google Cloud instance. See error above."
+    --quiet || create_res=$?
+
+  if [ $create_res -ne 0 ]; then
+    warn "First image attempt failed. Retrying with fallback Ubuntu 22.04 LTS image family…"
+    gcloud compute instances create "$INSTANCE_NAME" \
+      --zone="$ZONE" \
+      --machine-type="$MACHINE_TYPE" \
+      --boot-disk-type="$DISK_TYPE" \
+      --boot-disk-size="$DISK_SIZE" \
+      --image-family="ubuntu-2204-lts" \
+      --image-project="$IMAGE_PROJECT" \
+      --tags=hermes-agent \
+      --quiet || die "Failed to create Google Cloud instance. See error above."
+  fi
 
   ok "Always-Free VM successfully provisioned!"
 }
