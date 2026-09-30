@@ -8,9 +8,11 @@
 #           bash hermes-easy-setup.sh model      only (re)pick + tune the local model
 #           bash hermes-easy-setup.sh slack      only (re)do the Slack connection
 #           bash hermes-easy-setup.sh doctor     check everything, change nothing
+#           bash hermes-easy-setup.sh reset      clean wipe to start over from scratch
+#           bash hermes-easy-setup.sh gcp        auto-deploy 24/7 Always-Free instance on Google Cloud
 #
 #  Safe to re-run: every step checks what is already done.
-#  Written for the stock macOS bash 3.2 — no associative arrays, no mapfile.
+#  Written for stock macOS / Linux bash — no associative arrays, no mapfile.
 # =============================================================================
 set -u
 
@@ -24,20 +26,44 @@ LOCAL_ID="hermes-local"        # stable model name Hermes will be pointed at
 REQUIRED_SCOPES="chat:write app_mentions:read channels:history channels:read groups:history groups:read im:history im:read im:write mpim:history mpim:read users:read files:read files:write"
 BACKEND=""
 BASE_URL=""
+OPENROUTER_API_KEY=""
+GEMINI_API_KEY=""
+MODEL_TEMP="0.2"
+MODEL_FALLBACK_REPO=""
+MODEL_TAG=""
+MODEL_REPO=""
+MODEL_LABEL=""
+IS_INTEL=0
+LMS_HAS_MLX=0
 
-# Model catalogue:  min_ram_gb | label | ollama_tag | mlx_repo | why
+# Google AI Studio / Gemini Presets: option | label | slug | context_length | temp
+GEMINI_PRESETS='
+1|Gemini 2.5 Flash (Recommended: 100% Free tier API, high-speed, 1M context)|gemini-2.5-flash|1000000|0.2
+2|Gemini 2.5 Pro (Deep reasoning, complex workflows & agent tool use)|gemini-2.5-pro|1000000|0.2
+3|Gemini 1.5 Flash (Fast, reliable legacy tier)|gemini-1.5-flash|1000000|0.2
+'
+
+# OpenRouter Curated Presets: option | label | slug | context_length | temp
+OPENROUTER_PRESETS='
+1|GLM-5.3 Flash (Recommended: high-speed, elite reasoning & tool execution)|z-ai/glm-5.3-flash|128000|0.2
+2|DeepSeek V4 Flash (next-gen coding & fast agent problem solving)|deepseek/deepseek-v4-flash-0731|128000|0.2
+3|GPT-6 Luna Pro (flagship enterprise intelligence & precision)|openai/gpt-6-luna-pro|128000|0.2
+4|Qwen 3.7 Flash (ultra-snappy, cost-effective agent workhorse)|qwen/qwen3.7-flash|128000|0.2
+'
+
+# Model catalogue:  min_ram_gb | label | ollama_tag | mlx_repo | gguf_repo | why
 # Dynamic bounds: Safe memory headroom is calculated dynamically at runtime.
 CATALOGUE='
-36|Qwen3.6 35B-A3B (best tool use, fast MoE, ~20 GB)|qwen3.6:35b|mlx-community/Qwen3.6-35B-A3B-4bit|recommended
-36|Qwen3-Coder 30B-A3B (fastest coding/agent MoE, snappy)|qwen3-coder:30b|mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit|fastest
-36|Gemma 4 26B-A4B (fast MoE, good writing & reasoning)|gemma4:26b|mlx-community/gemma-4-26b-a4b-it-4bit|alternative
-24|GPT-OSS 20B (fast MoE, 13 GB)|gpt-oss:20b|mlx-community/gpt-oss-20b-MXFP4-Q8|recommended
-24|Qwen2.5-Coder 14B (strong coding & tools, 9 GB)|qwen2.5-coder:14b|mlx-community/Qwen2.5-Coder-14B-Instruct-4bit|alternative
-16|Hermes 3 3B (Nous Research agent model, ~1.9 GB, safest on 16 GB)|hermes3:3b|mlx-community/Hermes-3-Llama-3.2-3B-4bit|recommended
-16|Qwen3 4B (fast agent, ~2.5 GB, 64K context)|qwen3:4b|mlx-community/Qwen3-4B-Instruct-2507-4bit|alternative
-16|Qwen2.5-Coder 7B (elite tool use, ~8.3 GB total, close other apps)|qwen2.5-coder:7b|mlx-community/Qwen2.5-Coder-7B-Instruct-4bit|alternative
-8|Hermes 3 3B (Nous Research agent model, ~1.9 GB)|hermes3:3b|mlx-community/Hermes-3-Llama-3.2-3B-4bit|recommended
-8|Qwen3 4B (small, basic tool use only)|qwen3:4b|mlx-community/Qwen3-4B-Instruct-2507-4bit|alternative
+36|Qwen3.6 35B-A3B (best tool use, fast MoE, ~20 GB)|qwen3.6:35b|mlx-community/Qwen3.6-35B-A3B-4bit|Qwen/Qwen2.5-32B-Instruct-GGUF|recommended
+36|Qwen3-Coder 30B-A3B (fastest coding/agent MoE, snappy)|qwen3-coder:30b|mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit|Qwen/Qwen2.5-Coder-32B-Instruct-GGUF|fastest
+36|Gemma 4 26B-A4B (fast MoE, good writing & reasoning)|gemma4:26b|mlx-community/gemma-4-26b-a4b-it-4bit|google/gemma-2-27b-it-GGUF|alternative
+24|GPT-OSS 20B (fast MoE, 13 GB)|gpt-oss:20b|mlx-community/gpt-oss-20b-MXFP4-Q8|bartowski/gpt-oss-20b-GGUF|recommended
+24|Qwen2.5-Coder 14B (strong coding & tools, 9 GB)|qwen2.5-coder:14b|mlx-community/Qwen2.5-Coder-14B-Instruct-4bit|Qwen/Qwen2.5-Coder-14B-Instruct-GGUF|alternative
+16|Hermes 3 3B (Nous Research agent model, ~1.9 GB, safest on 16 GB)|hermes3:3b|mlx-community/Hermes-3-Llama-3.2-3B-4bit|NousResearch/Hermes-3-Llama-3.2-3B-GGUF|recommended
+16|Qwen3 4B (fast agent, ~2.5 GB, 64K context)|qwen3:4b|mlx-community/Qwen3-4B-Instruct-2507-4bit|Qwen/Qwen2.5-3B-Instruct-GGUF|alternative
+16|Qwen2.5-Coder 7B (elite tool use, ~8.3 GB total, close other apps)|qwen2.5-coder:7b|mlx-community/Qwen2.5-Coder-7B-Instruct-4bit|Qwen/Qwen2.5-Coder-7B-Instruct-GGUF|alternative
+8|Hermes 3 3B (Nous Research agent model, ~1.9 GB)|hermes3:3b|mlx-community/Hermes-3-Llama-3.2-3B-4bit|NousResearch/Hermes-3-Llama-3.2-3B-GGUF|recommended
+8|Qwen3 4B (small, basic tool use only)|qwen3:4b|mlx-community/Qwen3-4B-Instruct-2507-4bit|Qwen/Qwen2.5-3B-Instruct-GGUF|alternative
 '
 
 # ------------------------------------------------------------------ helpers --
@@ -53,6 +79,21 @@ ask()   { local a; read -r -p "    $1 " a; echo "$a"; }
 yesno() { local a; read -r -p "    $1 [Y/n] " a; case "$a" in n*|N*) return 1;; *) return 0;; esac; }
 have()  { command -v "$1" >/dev/null 2>&1; }
 trim()  { echo "$1" | tr -d '[:space:]'; }
+
+open_url() {
+  local url="$1"
+  if have open; then open "$url" 2>/dev/null || true
+  elif have xdg-open; then xdg-open "$url" 2>/dev/null || true
+  else info "Open this URL in your browser: ${B}$url${N}"; fi
+}
+
+copy_to_clipboard() {
+  local f="$1"
+  if have pbcopy; then pbcopy < "$f" 2>/dev/null || true
+  elif have xclip; then xclip -selection clipboard < "$f" 2>/dev/null || true
+  elif have xsel; then xsel --clipboard --input < "$f" 2>/dev/null || true
+  fi
+}
 
 # json <python-expression-on-d>   — reads JSON from stdin, prints the expression
 json()  { python3 -c "import sys,json
@@ -125,38 +166,91 @@ trap 'watchdog_stop; rm -f "$WATCHDOG_FLAG" "$HDRS"' EXIT INT TERM
 
 # --------------------------------------------------------------- 0 preflight --
 preflight() {
-  step "Step 0 · Checking this Mac"
-  [ "$(uname -s)" = "Darwin" ] || die "This script is for macOS."
-  mkdir -p "$HERMES_HOME"; : >> "$LOG"
-  export PATH="$HOME/.local/bin:$HOME/.cache/lm-studio/bin:$HOME/.lmstudio/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+  local os_type
+  os_type="$(uname -s)"
+  if [ "$os_type" = "Darwin" ]; then
+    step "Step 0 · Checking this Mac"
+    mkdir -p "$HERMES_HOME" 2>/dev/null || true
+    [ -d "$HERMES_HOME" ] && : >> "$LOG" 2>/dev/null || true
+    export PATH="$HOME/.local/bin:$HOME/.cache/lm-studio/bin:$HOME/.lmstudio/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-  if ! xcode-select -p >/dev/null 2>&1; then
-    warn "Apple's developer tools are needed (one-time, free, ~5 min)."
-    info "A window will pop up — click ${B}Install${N}, wait for it to finish."
-    xcode-select --install >/dev/null 2>&1
-    until xcode-select -p >/dev/null 2>&1; do sleep 10; printf "."; done; echo
+    if ! xcode-select -p >/dev/null 2>&1; then
+      warn "Apple's developer tools are needed (one-time, free, ~5 min)."
+      info "A window will pop up — click ${B}Install${N}, wait for it to finish."
+      xcode-select --install >/dev/null 2>&1
+      until xcode-select -p >/dev/null 2>&1; do sleep 10; printf "."; done; echo
+    fi
+    ok "Developer tools present"
+
+    ARCH="$(uname -m)"
+    if [ "$ARCH" != "arm64" ]; then
+      IS_INTEL=1
+    else
+      IS_INTEL=0
+    fi
+    CHIP="$(sysctl -n machdep.cpu.brand_string 2>/dev/null)"
+    TOTAL_RAM_BYTES="$(sysctl -n hw.memsize 2>/dev/null || echo 17179869184)"
+    RAM_GB=$(( TOTAL_RAM_BYTES / 1073741824 ))
+    DISK_GB=$(df -g "$HOME" | awk 'NR==2{print $4}')
+  elif [ "$os_type" = "Linux" ]; then
+    step "Step 0 · Checking this Linux / Cloud Server"
+    mkdir -p "$HERMES_HOME" 2>/dev/null || true
+    [ -d "$HERMES_HOME" ] && : >> "$LOG" 2>/dev/null || true
+    export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+
+    ARCH="$(uname -m)"
+    IS_INTEL=1
+    CHIP="$(lscpu 2>/dev/null | awk -F: '/Model name/{print $2}' | sed 's/^[ \t]*//' || uname -m)"
+    [ -z "$CHIP" ] && CHIP="$(uname -m) CPU"
+    TOTAL_RAM_KB="$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null || echo 1048576)"
+    TOTAL_RAM_BYTES=$(( TOTAL_RAM_KB * 1024 ))
+    RAM_GB=$(( TOTAL_RAM_KB / 1048576 ))
+    DISK_GB=$(df -BG "$HOME" 2>/dev/null | awk 'NR==2{print $4}' | tr -d 'G')
+    [ -z "$DISK_GB" ] && DISK_GB=20
+
+    # Auto-swap remediation for 1GB VPS (such as Google Cloud e2-micro Always Free)
+    local swap_total_kb
+    swap_total_kb="$(awk '/SwapTotal/{print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+    if [ "$RAM_GB" -le 1 ] && [ "$swap_total_kb" -lt 1048576 ]; then
+      info "Memory-constrained 1 GB cloud instance detected (${RAM_GB} GB RAM)."
+      info "Checking for swap space to prevent out-of-memory kernel kills…"
+      if [ ! -f /swapfile ] && have sudo; then
+        info "Configuring 2 GB swapfile at /swapfile…"
+        sudo fallocate -l 2G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048 2>/dev/null || true
+        if [ -f /swapfile ]; then
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile >>"$LOG" 2>&1 || true
+          sudo swapon /swapfile >>"$LOG" 2>&1 || true
+          grep -q '/swapfile' /etc/fstab 2>/dev/null || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null 2>&1 || true
+          ok "2 GB swap space configured and active"
+        fi
+      elif [ -f /swapfile ] && have sudo; then
+        sudo swapon /swapfile 2>/dev/null || true
+        ok "Existing swapfile activated"
+      fi
+    fi
+  else
+    die "Unsupported operating system: $os_type. Supported: macOS and Linux."
   fi
-  ok "Developer tools present"
-
-  ARCH="$(uname -m)"
-  CHIP="$(sysctl -n machdep.cpu.brand_string 2>/dev/null)"
-  TOTAL_RAM_BYTES="$(sysctl -n hw.memsize 2>/dev/null || echo 17179869184)"
-  RAM_GB=$(( TOTAL_RAM_BYTES / 1073741824 ))
-  DISK_GB=$(df -g "$HOME" | awk 'NR==2{print $4}')
 
   # Dynamic unified memory bounds analysis:
-  # macOS kernel, WindowServer, Slack, IDE and running apps require dedicated headroom.
-  # Reserving minimum 4.5 GB on 16 GB systems, 35% on medium systems, capped at 10 GB on high-memory systems.
   TOTAL_RAM_KB=$(( TOTAL_RAM_BYTES / 1024 ))
   SYSTEM_RESERVE_KB=$(( TOTAL_RAM_KB * 35 / 100 ))
-  [ "$SYSTEM_RESERVE_KB" -lt 4718592 ] && SYSTEM_RESERVE_KB=4718592   # minimum 4.5 GB reserved for OS/apps
-  [ "$SYSTEM_RESERVE_KB" -gt 10485760 ] && SYSTEM_RESERVE_KB=10485760 # cap reserve at 10 GB
+  [ "$SYSTEM_RESERVE_KB" -lt 4718592 ] && SYSTEM_RESERVE_KB=4718592
+  [ "$SYSTEM_RESERVE_KB" -gt 10485760 ] && SYSTEM_RESERVE_KB=10485760
   MAX_SAFE_RSS_KB=$(( TOTAL_RAM_KB - SYSTEM_RESERVE_KB ))
+  [ "$MAX_SAFE_RSS_KB" -lt 524288 ] && MAX_SAFE_RSS_KB=524288
   MAX_SAFE_RSS_GB=$(( MAX_SAFE_RSS_KB / 1048576 ))
   SYSTEM_RESERVE_GB=$(( SYSTEM_RESERVE_KB / 1048576 ))
 
-  # Hardware profiling for Hermes Agent & 64K context
-  if [ "$RAM_GB" -ge 48 ]; then
+  # Hardware profiling for Hermes Agent
+  if [ "$os_type" = "Linux" ] && [ "$RAM_GB" -le 2 ]; then
+    HW_PROFILE="Linux Cloud VPS Profile (${RAM_GB} GB RAM + 2 GB Swap)"
+    HW_MEM_NOTE="Cloud VPS instance: Use Google Gemini (100% Free Tier API) or OpenRouter for inference with zero local RAM load."
+  elif [ $IS_INTEL -eq 1 ]; then
+    HW_PROFILE="Intel / x86_64 Profile (${ARCH}, ${RAM_GB} GB RAM)"
+    HW_MEM_NOTE="x86_64 architecture detected: Apple Silicon MLX is not supported. Local models run via GGUF / Ollama."
+  elif [ "$RAM_GB" -ge 48 ]; then
     HW_PROFILE="High-Capacity MoE Profile (48+ GB Unified Memory)"
     HW_MEM_NOTE="Substantial headroom (${MAX_SAFE_RSS_GB} GB model budget): 30B-35B MoE models run with dedicated GPU acceleration."
   elif [ "$RAM_GB" -ge 32 ]; then
@@ -186,7 +280,42 @@ preflight() {
 
 # ------------------------------------------------------------ 1 pick backend --
 detect_backend() {
-  step "Step 1 · Finding your local AI engine"
+  step "Step 1 · Selecting your AI engine"
+
+  if [ "${HERMES_BACKEND:-}" != "" ]; then
+    case "$HERMES_BACKEND" in
+      google|gemini|Google|Gemini) BACKEND="gemini";;
+      openrouter|OpenRouter) BACKEND="openrouter";;
+      ollama|lmstudio|local) BACKEND="$HERMES_BACKEND";;
+      *) BACKEND="$HERMES_BACKEND";;
+    esac
+  else
+    echo "    Choose how you want to run Hermes Agent:"
+    echo "      ${B}1)${N} Google AI Studio / Gemini ${G}(Recommended: 100% Free Tier API, 1M context, zero Mac RAM)${N}"
+    echo "      ${B}2)${N} OpenRouter Cloud ${C}(BYOK: access to GLM-5.3, DeepSeek, GPT-6 Luna, etc.)${N}"
+    echo "      ${B}3)${N} Local Engine ${Y}(Ollama / LM Studio: runs on your Mac's hardware)${N}"
+    echo
+    local mode_pick
+    mode_pick="$(ask "Select engine type [1, 2, or 3, default: 1]:")"
+    case "${mode_pick:-1}" in
+      1|gemini|google|Google|Gemini) BACKEND="gemini";;
+      2|openrouter|OpenRouter) BACKEND="openrouter";;
+      3|local|Local) BACKEND="local";;
+      *) BACKEND="gemini";;
+    esac
+  fi
+
+  if [ "$BACKEND" = "gemini" ]; then
+    ok "Using ${B}Google AI Studio (Gemini)${N} — 1M context free tier with zero Mac memory footprint"
+    BASE_URL="https://generativelanguage.googleapis.com/v1beta"
+    return 0
+  elif [ "$BACKEND" = "openrouter" ]; then
+    ok "Using ${B}OpenRouter Cloud (BYOK)${N} — fast inference with zero Mac memory footprint"
+    BASE_URL="https://openrouter.ai/api/v1"
+    return 0
+  fi
+
+  step "Step 1b · Finding your local AI engine"
   HAS_LMS=0; HAS_OLLAMA=0
   if have lms; then
     HAS_LMS=1
@@ -211,11 +340,17 @@ detect_backend() {
   [ $HAS_LMS -eq 1 ]    && ok "LM Studio found"
   [ $HAS_OLLAMA -eq 1 ] && ok "Ollama found"
 
-  if [ "${HERMES_BACKEND:-}" != "" ]; then
-    BACKEND="$HERMES_BACKEND"
-  elif [ $HAS_LMS -eq 1 ] && [ $HAS_OLLAMA -eq 1 ]; then
+  if [ $HAS_LMS -eq 1 ] && [ $HAS_OLLAMA -eq 1 ]; then
     info "Both LM Studio and Ollama are available."
-    if [ "$RAM_GB" -lt 24 ]; then
+    if [ "$ARCH" != "arm64" ]; then
+      info "  ${B}1)${N} Ollama (Recommended on Intel Macs: native GGUF on Metal/CPU)"
+      info "  ${B}2)${N} LM Studio (GGUF engine)"
+      local be_pick; be_pick="$(ask "Which engine would you like to use? [1 or 2, default: 1]:")"
+      case "${be_pick:-1}" in
+        2|lmstudio|LMStudio|lm-studio) BACKEND=lmstudio;;
+        *) BACKEND=ollama;;
+      esac
+    elif [ "$RAM_GB" -lt 24 ]; then
       info "  ${B}1)${N} Ollama (Recommended on ${RAM_GB} GB Macs: 8-bit quantized Metal KV cache prevents memory exhaustion at 64K context)"
       info "  ${B}2)${N} LM Studio (MLX engine: unquantized KV cache; auto-balanced GPU offload applied)"
       local be_pick; be_pick="$(ask "Which engine would you like to use? [1 or 2, default: 1]:")"
@@ -266,8 +401,13 @@ detect_backend() {
 
 # -------------------------------------------------------------- 2 pick model --
 exists_online() { # exists_online ROW  -> 0 if downloadable for the active backend
-  local tag repo; tag="$(echo "$1" | cut -d'|' -f3)"; repo="$(echo "$1" | cut -d'|' -f4)"
+  local tag mlx_repo gguf_repo
+  tag="$(echo "$1" | cut -d'|' -f3)"
+  mlx_repo="$(echo "$1" | cut -d'|' -f4)"
+  gguf_repo="$(echo "$1" | cut -d'|' -f5)"
   if [ "$BACKEND" = lmstudio ]; then
+    local repo="$mlx_repo"
+    [ "${ARCH:-}" != "arm64" ] && repo="$gguf_repo"
     [ "$(curl -s -o /dev/null -w '%{http_code}' "https://huggingface.co/api/models/$repo")" = 200 ]
   else
     [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
@@ -276,11 +416,14 @@ exists_online() { # exists_online ROW  -> 0 if downloadable for the active backe
 }
 
 pick_model() {
-  step "Step 2 · Choosing the best model for ${RAM_GB} GB of memory"
+  step "Step 2 · Choosing the best local model for ${RAM_GB} GB of memory"
   # Tier = largest min_ram that fits. Model + 64K KV cache must stay under ~60% of RAM.
   TIER=8; for t in 16 24 36; do [ "$RAM_GB" -ge "$t" ] && TIER=$t; done
 
-  if [ "$TIER" -le 16 ]; then
+  if [ "$ARCH" != "arm64" ]; then
+    info "${C}Intel Architecture Note:${N}"
+    info "Running on Intel CPU/Metal. Models will resolve via verified GGUF weights."
+  elif [ "$TIER" -le 16 ]; then
     info "${C}16 GB Apple Silicon Architecture Note:${N}"
     info "Hermes Agent requires a 64K context window for multi-step tool calling."
     info "Safe model ceiling: ${MAX_SAFE_RSS_GB} GB (reserving ${SYSTEM_RESERVE_GB} GB for macOS)."
@@ -296,14 +439,14 @@ pick_model() {
     [ -z "$row" ] && continue
     [ "$(echo "$row" | cut -d'|' -f1)" = "$TIER" ] || continue
     if exists_online "$row"; then n=$((n+1)); CHOICES="$CHOICES$row"$'\n'
-      echo "    ${B}$n)${N} $(echo "$row" | cut -d'|' -f2)   ${C}[$(echo "$row" | cut -d'|' -f5)]${N}"
+      echo "    ${B}$n)${N} $(echo "$row" | cut -d'|' -f2)   ${C}[$(echo "$row" | cut -d'|' -f6)]${N}"
     fi
   done <<EOF
 $CATALOGUE
 EOF
   [ $n -eq 0 ] && die "Couldn't reach Hugging Face / Ollama to check models. Is the internet working?"
 
-  if [ "$BACKEND" = lmstudio ]; then   # show what is trending — informational only
+  if [ "$BACKEND" = lmstudio ] && [ "$ARCH" = "arm64" ]; then   # show what is trending — informational only
     info "${C}Newest popular MLX builds on Hugging Face (FYI):${N}"
     curl -s "https://huggingface.co/api/models?author=mlx-community&filter=text-generation&sort=trendingScore&limit=5" \
       | python3 -c "import sys,json
@@ -320,9 +463,349 @@ except Exception: pass"
     row="$(echo "$CHOICES" | sed -n "${pick}p")"; [ -z "$row" ] && row="$(echo "$CHOICES" | sed -n 1p)"
     MODEL_LABEL="$(echo "$row" | cut -d'|' -f2)"
     MODEL_TAG="$(echo "$row" | cut -d'|' -f3)"
-    MODEL_REPO="$(echo "$row" | cut -d'|' -f4)"
+    local mlx_repo gguf_repo
+    mlx_repo="$(echo "$row" | cut -d'|' -f4)"
+    gguf_repo="$(echo "$row" | cut -d'|' -f5)"
+    if [ "$ARCH" != "arm64" ]; then
+      MODEL_REPO="$gguf_repo"
+      MODEL_FALLBACK_REPO="$mlx_repo"
+    else
+      MODEL_REPO="$mlx_repo"
+      MODEL_FALLBACK_REPO="$gguf_repo"
+    fi
   fi
+  LOCAL_ID="hermes-local"
   ok "Selected: $MODEL_LABEL"
+}
+
+# --------------------------------------------- google gemini & openrouter --
+validate_gemini_key() {
+  local key=""
+  key="$(get_env GEMINI_API_KEY)"
+  [ -z "$key" ] && key="$(get_env GOOGLE_API_KEY)"
+  if [ -n "${HERMES_GEMINI_KEY:-}" ]; then
+    key="$HERMES_GEMINI_KEY"
+  fi
+
+  while :; do
+    if [ -z "$key" ]; then
+      echo
+      info "${B}Enter your Google Gemini API Key${N} (starts with 'AIzaSy...'):"
+      info "Get or view free keys at: https://aistudio.google.com"
+      key="$(trim "$(ask "Gemini API Key:")")"
+    fi
+
+    [ -z "$key" ] && { bad "API Key cannot be empty."; key=""; continue; }
+
+    info "Validating Gemini API key with Google AI Studio…"
+    local auth_res
+    auth_res="$(curl -s -m 15 "https://generativelanguage.googleapis.com/v1beta/models?key=$key" 2>/dev/null || true)"
+
+    if echo "$auth_res" | grep -qi "API_KEY_INVALID\|error"; then
+      local err_msg
+      err_msg="$(echo "$auth_res" | json "d.get('error',{}).get('message')")"
+      bad "Google AI Studio rejected the key: ${err_msg:-Invalid API key}"
+      key=""
+      continue
+    fi
+
+    GEMINI_API_KEY="$key"
+    set_env GEMINI_API_KEY "$key"
+    set_env GOOGLE_API_KEY "$key"
+    ok "Google Gemini key validated successfully (saved to ~/.hermes/.env)"
+    break
+  done
+}
+
+pick_gemini_preset() {
+  step "Step 2 · Choosing a Google Gemini Model"
+  info "Select a Gemini model for Hermes Agent (1,000,000 token context window):"
+  echo
+  local row
+  while IFS= read -r row; do
+    [ -z "$row" ] && continue
+    local opt label slug
+    opt="$(echo "$row" | cut -d'|' -f1)"
+    label="$(echo "$row" | cut -d'|' -f2)"
+    slug="$(echo "$row" | cut -d'|' -f3)"
+    echo "    ${B}$opt)${N} ${label}  ${C}[${slug}]${N}"
+  done <<EOF
+$GEMINI_PRESETS
+EOF
+  echo "    ${B}4)${N} Custom Model Name (enter custom Gemini model identifier)"
+  echo
+
+  local pick
+  if [ -n "${HERMES_MODEL_OVERRIDE:-}" ]; then
+    MODEL_LABEL="Custom Override"
+    MODEL_TAG="$HERMES_MODEL_OVERRIDE"
+    CTX=1000000
+    MODEL_TEMP=0.2
+  else
+    pick="$(ask "Type a number [1-4, default: 1]:")"
+    pick="${pick:-1}"
+    case "$pick" in
+      1)
+        MODEL_LABEL="Gemini 2.5 Flash"
+        MODEL_TAG="gemini-2.5-flash"
+        CTX=1000000
+        MODEL_TEMP=0.2
+        ;;
+      2)
+        MODEL_LABEL="Gemini 2.5 Pro"
+        MODEL_TAG="gemini-2.5-pro"
+        CTX=1000000
+        MODEL_TEMP=0.2
+        ;;
+      3)
+        MODEL_LABEL="Gemini 1.5 Flash"
+        MODEL_TAG="gemini-1.5-flash"
+        CTX=1000000
+        MODEL_TEMP=0.2
+        ;;
+      4|custom|Custom)
+        local custom_slug
+        custom_slug="$(trim "$(ask "Enter Gemini model identifier (e.g. gemini-2.5-flash):")")"
+        [ -z "$custom_slug" ] && custom_slug="gemini-2.5-flash"
+        MODEL_LABEL="Custom ($custom_slug)"
+        MODEL_TAG="$custom_slug"
+        CTX=1000000
+        MODEL_TEMP=0.2
+        ;;
+      *)
+        MODEL_LABEL="Gemini 2.5 Flash"
+        MODEL_TAG="gemini-2.5-flash"
+        CTX=1000000
+        MODEL_TEMP=0.2
+        ;;
+    esac
+  fi
+  LOCAL_ID="$MODEL_TAG"
+  ok "Selected model: ${B}$MODEL_TAG${N} ($MODEL_LABEL, context: ${CTX})"
+}
+
+tune_gemini() {
+  step "Step 3 · Configuring Hermes for Google Gemini"
+  validate_gemini_key
+  install_handoff_skill
+
+  info "Setting Gemini configuration in Hermes…"
+  mkdir -p "$HERMES_HOME"
+  [ -f "$HERMES_HOME/config.yaml" ] && [ ! -f "$HERMES_HOME/config.yaml.before-easy-setup" ] && cp "$HERMES_HOME/config.yaml" "$HERMES_HOME/config.yaml.before-easy-setup"
+
+  if have hermes; then
+    hermes config set model.provider gemini >>"$LOG" 2>&1
+    hermes config set model.default "$MODEL_TAG" >>"$LOG" 2>&1
+    hermes config set model.context_length "$CTX" >>"$LOG" 2>&1
+    hermes config set model.temperature "${MODEL_TEMP:-0.2}" >>"$LOG" 2>&1
+
+    # Replace lossy compaction with agent-thread-tools handoffs
+    hermes config set compression.enabled false >>"$LOG" 2>&1 || true
+    hermes config set auxiliary.compression.enabled false >>"$LOG" 2>&1 || true
+    hermes config set auxiliary.title_generation.enabled false >>"$LOG" 2>&1 || true
+    hermes config set auxiliary.background_review.enabled false >>"$LOG" 2>&1 || true
+
+    # Execution approvals for Slack gateway daemon
+    hermes config set approvals.mode smart >>"$LOG" 2>&1 || true
+    hermes config set approvals.timeout 300 >>"$LOG" 2>&1 || true
+    hermes config set slack.require_mention false >>"$LOG" 2>&1 || true
+  fi
+
+  set_env HERMES_API_TIMEOUT 180
+  ok "Hermes configured for Google Gemini (1M context, smart approvals, durable handoffs)"
+}
+
+# ---------------------------------------------------- openrouter & handoff --
+validate_openrouter_key() {
+  local key=""
+  key="$(get_env OPENROUTER_API_KEY)"
+  if [ -n "${HERMES_OPENROUTER_KEY:-}" ]; then
+    key="$HERMES_OPENROUTER_KEY"
+  fi
+
+  while :; do
+    if [ -z "$key" ]; then
+      echo
+      info "${B}Enter your OpenRouter API Key${N} (starts with 'sk-or-'):"
+      info "Get or view keys at: https://openrouter.ai/keys"
+      key="$(trim "$(ask "API Key:")")"
+    fi
+
+    [ -z "$key" ] && { bad "API Key cannot be empty."; key=""; continue; }
+
+    info "Validating OpenRouter API key and checking credit balance…"
+    local auth_res
+    auth_res="$(curl -s -m 15 -H "Authorization: Bearer $key" "https://openrouter.ai/api/v1/key" 2>/dev/null || true)"
+    local key_label key_rem
+
+    key_label="$(echo "$auth_res" | json "d.get('data',{}).get('label')")"
+    if [ -z "$key_label" ] && echo "$auth_res" | grep -qi "error"; then
+      local err_msg
+      err_msg="$(echo "$auth_res" | json "d.get('error',{}).get('message')")"
+      bad "OpenRouter rejected the key: ${err_msg:-Invalid API key}"
+      key=""
+      continue
+    fi
+
+    key_rem="$(echo "$auth_res" | json "d.get('data',{}).get('limit_remaining')")"
+    OPENROUTER_API_KEY="$key"
+    set_env OPENROUTER_API_KEY "$key"
+
+    if [ -n "$key_rem" ] && [ "$key_rem" != "None" ]; then
+      if [ "$(python3 -c "print(1 if float($key_rem) <= 0.0 else 0)" 2>/dev/null)" = "1" ]; then
+        warn "Key '${key_label:-default}' is active, but remaining credit is \$${key_rem}."
+        warn "Add credits before messaging Hermes: https://openrouter.ai/credits"
+      else
+        ok "OpenRouter key active ('${key_label:-default}', \$${key_rem} remaining credit)"
+      fi
+    else
+      ok "OpenRouter key active ('${key_label:-default}')"
+    fi
+    break
+  done
+}
+
+pick_openrouter_preset() {
+  step "Step 2 · Choosing an OpenRouter model preset"
+  info "Select a curated agent model preset optimized for tool calling and reasoning:"
+  echo
+  local row
+  while IFS= read -r row; do
+    [ -z "$row" ] && continue
+    local opt label slug
+    opt="$(echo "$row" | cut -d'|' -f1)"
+    label="$(echo "$row" | cut -d'|' -f2)"
+    slug="$(echo "$row" | cut -d'|' -f3)"
+    echo "    ${B}$opt)${N} ${label}  ${C}[${slug}]${N}"
+  done <<EOF
+$OPENROUTER_PRESETS
+EOF
+  echo "    ${B}5)${N} Custom Model Slug (enter your own OpenRouter model)"
+  echo
+
+  local pick
+  if [ -n "${HERMES_MODEL_OVERRIDE:-}" ]; then
+    MODEL_LABEL="Custom Override"
+    MODEL_TAG="$HERMES_MODEL_OVERRIDE"
+    CTX=128000
+    MODEL_TEMP=0.2
+  else
+    pick="$(ask "Type a number [1-5, default: 1]:")"
+    pick="${pick:-1}"
+    case "$pick" in
+      1)
+        MODEL_LABEL="GLM-5.3 Flash"
+        MODEL_TAG="z-ai/glm-5.3-flash"
+        CTX=128000
+        MODEL_TEMP=0.2
+        ;;
+      2)
+        MODEL_LABEL="DeepSeek V4 Flash"
+        MODEL_TAG="deepseek/deepseek-v4-flash-0731"
+        CTX=128000
+        MODEL_TEMP=0.2
+        ;;
+      3)
+        MODEL_LABEL="GPT-6 Luna Pro"
+        MODEL_TAG="openai/gpt-6-luna-pro"
+        CTX=128000
+        MODEL_TEMP=0.2
+        ;;
+      4)
+        MODEL_LABEL="Qwen 3.7 Flash"
+        MODEL_TAG="qwen/qwen3.7-flash"
+        CTX=128000
+        MODEL_TEMP=0.2
+        ;;
+      5|custom|Custom)
+        local custom_slug
+        custom_slug="$(trim "$(ask "Enter full OpenRouter model slug (e.g. meta-llama/llama-3.3-70b-instruct):")")"
+        [ -z "$custom_slug" ] && custom_slug="z-ai/glm-5.3-flash"
+        MODEL_LABEL="Custom ($custom_slug)"
+        MODEL_TAG="$custom_slug"
+        CTX=128000
+        MODEL_TEMP=0.2
+        ;;
+      *)
+        MODEL_LABEL="GLM-5.3 Flash"
+        MODEL_TAG="z-ai/glm-5.3-flash"
+        CTX=128000
+        MODEL_TEMP=0.2
+        ;;
+    esac
+  fi
+  LOCAL_ID="$MODEL_TAG"
+  ok "Selected model: ${B}$MODEL_TAG${N} ($MODEL_LABEL, context: ${CTX})"
+}
+
+install_handoff_skill() {
+  step "Handoff · Installing Durable Thread Handoff Skill"
+  local skill_dir="$HERMES_HOME/skills/thread-handoff"
+  mkdir -p "$skill_dir" "$HERMES_HOME/handoffs"
+  cat > "$skill_dir/SKILL.md" <<'EOF'
+---
+name: thread-handoff
+description: Distil a long session or Slack thread into a durable, dated handoff file instead of lossy compaction. Use when the user asks to hand off, preserve context, start fresh, or when conversation context is growing long.
+---
+
+# Thread Handoff (Hermes Agent)
+
+## Goal
+Capture durable facts, user requirements, decisions, and outstanding tasks out of the active conversation thread into a structured Markdown file, so a fresh session or clean thread continues without carrying token-heavy historical baggage.
+
+## Where things go
+- Handoff file: `~/.hermes/handoffs/YYYY-MM-DD-short-topic.md` (or `.reference/handoffs/` if inside a project git repository).
+- Structure:
+  1. **Date & Topic**: ISO date and short topic name.
+  2. **Objective**: What was being accomplished.
+  3. **Key Decisions & Requirements**: Facts and architectural decisions that must not blur.
+  4. **Current Status**: What is complete, what was tested.
+  5. **Next Actions**: Clear, actionable next steps for the next turn.
+
+## Handoff Trigger
+- When a user in Slack or Terminal says `/handoff` or asks to rotate/refresh context:
+  1. Draft and save the handoff file.
+  2. Inform the user of the saved path and summary.
+  3. Provide a brief 3-line resumption snippet.
+EOF
+  ok "Durable thread handoff skill installed to ~/.hermes/skills/thread-handoff/"
+  info "Lossy LLM compaction replaced by durable handoffs (saves tokens & preserves facts)"
+}
+
+tune_openrouter() {
+  step "Step 3 · Optimizing Hermes Harness for OpenRouter"
+  validate_openrouter_key
+  install_handoff_skill
+
+  info "Configuring Hermes provider routing and parameters…"
+  mkdir -p "$HERMES_HOME"
+  [ -f "$HERMES_HOME/config.yaml" ] && [ ! -f "$HERMES_HOME/config.yaml.before-easy-setup" ] && cp "$HERMES_HOME/config.yaml" "$HERMES_HOME/config.yaml.before-easy-setup"
+
+  if have hermes; then
+    hermes config set model.provider openrouter >>"$LOG" 2>&1
+    hermes config set model.default "$MODEL_TAG" >>"$LOG" 2>&1
+    hermes config set model.context_length "$CTX" >>"$LOG" 2>&1
+    hermes config set model.temperature "${MODEL_TEMP:-0.2}" >>"$LOG" 2>&1
+
+    # Provider routing optimizations
+    hermes config set provider_routing.sort throughput >>"$LOG" 2>&1 || true
+    hermes config set provider_routing.require_parameters true >>"$LOG" 2>&1 || true
+    hermes config set provider_routing.data_collection deny >>"$LOG" 2>&1 || true
+
+    # Replace lossy compaction with agent-thread-tools handoffs
+    hermes config set compression.enabled false >>"$LOG" 2>&1 || true
+    hermes config set auxiliary.compression.enabled false >>"$LOG" 2>&1 || true
+    hermes config set auxiliary.title_generation.enabled false >>"$LOG" 2>&1 || true
+    hermes config set auxiliary.background_review.enabled false >>"$LOG" 2>&1 || true
+
+    # Execution approvals for Slack gateway daemon
+    hermes config set approvals.mode smart >>"$LOG" 2>&1 || true
+    hermes config set approvals.timeout 300 >>"$LOG" 2>&1 || true
+    hermes config set slack.require_mention false >>"$LOG" 2>&1 || true
+  fi
+
+  set_env HERMES_API_TIMEOUT 180
+  ok "OpenRouter harness configured (throughput routing, data privacy, smart approvals)"
 }
 
 # ------------------------------------------------------- 3 install + tune it --
@@ -401,8 +884,25 @@ tune_lmstudio() {
   esac
 
   info "Downloading $MODEL_REPO — this can take 10–30 min depending on network speed. Leave it running."
-  # LM Studio CLI resolves Hugging Face models via full URL; fallback to repo name or staff picks
-  lms get "$hf_url" --yes || lms get "$MODEL_REPO" --yes || lms get "$MODEL_REPO" --mlx --yes || die "Download failed."
+  local dl_ok=0
+  if lms get "$hf_url" --yes >>"$LOG" 2>&1 || lms get "$MODEL_REPO" --yes >>"$LOG" 2>&1; then
+    dl_ok=1
+  elif [ "$ARCH" = "arm64" ] && lms get "$MODEL_REPO" --mlx --yes >>"$LOG" 2>&1; then
+    dl_ok=1
+  fi
+
+  # Graceful fallback: If primary repository failed artifact resolution (e.g. MLX on Intel/non-MLX setup), try fallback repo (GGUF)
+  if [ $dl_ok -eq 0 ] && [ -n "${MODEL_FALLBACK_REPO:-}" ]; then
+    warn "Download of $MODEL_REPO was not resolved by LM Studio. Attempting GGUF fallback: $MODEL_FALLBACK_REPO…"
+    local fb_url="https://huggingface.co/$MODEL_FALLBACK_REPO"
+    if lms get "$fb_url" --yes >>"$LOG" 2>&1 || lms get "$MODEL_FALLBACK_REPO" --yes >>"$LOG" 2>&1; then
+      dl_ok=1
+      MODEL_REPO="$MODEL_FALLBACK_REPO"
+      ok "Fallback model $MODEL_REPO resolved and downloaded successfully"
+    fi
+  fi
+
+  [ $dl_ok -eq 0 ] && die "Download failed. LM Studio could not resolve a compatible artifact. See $LOG"
   lms unload --all >>"$LOG" 2>&1
 
   # Resolve the exact model key assigned by LM Studio on disk
@@ -468,7 +968,70 @@ EOF
 }
 
 benchmark() {
-  step "Step 4 · Canary verification & speed test"
+  step "Step 4 · Verification & latency test"
+  if [ "${BACKEND:-}" = "gemini" ]; then
+    [ -z "${GEMINI_API_KEY:-}" ] && GEMINI_API_KEY="$(get_env GEMINI_API_KEY)"
+    [ -z "${GEMINI_API_KEY:-}" ] && GEMINI_API_KEY="$(get_env GOOGLE_API_KEY)"
+    info "Warming up Google Gemini cloud model ($LOCAL_ID)…"
+    local body='{"contents":[{"parts":[{"text":"Count from 1 to 10, numbers only."}]}],"generationConfig":{"maxOutputTokens":40}}'
+    local t0 t1 res
+    t0=$(python3 -c 'import time;print(time.time())')
+    res="$(curl -s -m 30 "https://generativelanguage.googleapis.com/v1beta/models/${LOCAL_ID}:generateContent?key=${GEMINI_API_KEY}" \
+      -H "Content-Type: application/json" \
+      -d "$body" 2>/dev/null || true)"
+    t1=$(python3 -c 'import time;print(time.time())')
+
+    if echo "$res" | grep -qi "error"; then
+      local emsg
+      emsg="$(echo "$res" | json "d.get('error',{}).get('message')")"
+      bad "Google Gemini request failed: ${emsg:-Unknown error}"
+      return 1
+    fi
+
+    local toks latency
+    latency=$(python3 -c "print(round($t1-$t0, 2))")
+    toks="$(echo "$res" | json "d.get('usageMetadata',{}).get('candidatesTokenCount')")"
+    if [ -n "$toks" ] && [ "$toks" != "None" ] && [ "$toks" -gt 0 ] 2>/dev/null; then
+      local tps
+      tps=$(python3 -c "print(max(1, round($toks/max(0.001, $t1-$t0))))")
+      ok "${tps} tokens/second (${latency}s roundtrip) — verified active and responsive on Google Gemini."
+    else
+      ok "Google Gemini responded in ${latency}s — verified active and responsive."
+    fi
+    return 0
+  fi
+
+  if [ "${BACKEND:-}" = "openrouter" ]; then
+    [ -z "${OPENROUTER_API_KEY:-}" ] && OPENROUTER_API_KEY="$(get_env OPENROUTER_API_KEY)"
+    info "Warming up OpenRouter cloud model ($LOCAL_ID)…"
+    local body='{"model":"'"$LOCAL_ID"'","max_tokens":40,"messages":[{"role":"user","content":"Count from 1 to 10, numbers only."}]}'
+    local t0 t1 toks res
+    t0=$(python3 -c 'import time;print(time.time())')
+    res="$(curl -s -m 30 "https://openrouter.ai/api/v1/chat/completions" \
+      -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d "$body" 2>/dev/null || true)"
+    t1=$(python3 -c 'import time;print(time.time())')
+
+    if echo "$res" | grep -qi "error"; then
+      local emsg
+      emsg="$(echo "$res" | json "d.get('error',{}).get('message')")"
+      bad "OpenRouter request failed: ${emsg:-Unknown error}"
+      return 1
+    fi
+
+    toks="$(echo "$res" | json "d.get('usage',{}).get('completion_tokens')")"
+    if [ -n "$toks" ] && [ "$toks" != "None" ] && [ "$toks" -gt 0 ] 2>/dev/null; then
+      local tps latency
+      tps=$(python3 -c "print(max(1, round($toks/max(0.001, $t1-$t0))))")
+      latency=$(python3 -c "print(round($t1-$t0, 2))")
+      ok "${tps} tokens/second (${latency}s roundtrip) — verified active and responsive on OpenRouter."
+    else
+      ok "Model answered successfully from OpenRouter."
+    fi
+    return 0
+  fi
+
   local port=1234
   [ "${BACKEND:-}" = ollama ] && port=11434
 
@@ -539,6 +1102,46 @@ install_hermes() {
     ok "Hermes installed"
   fi
   [ -f "$HERMES_HOME/config.yaml" ] && [ ! -f "$HERMES_HOME/config.yaml.before-easy-setup" ] && cp "$HERMES_HOME/config.yaml" "$HERMES_HOME/config.yaml.before-easy-setup"
+
+  if [ "$BACKEND" = "gemini" ]; then
+    hermes config set model.provider gemini             >>"$LOG" 2>&1
+    hermes config set model.default "$LOCAL_ID"         >>"$LOG" 2>&1
+    hermes config set model.context_length "$CTX"       >>"$LOG" 2>&1
+    hermes config set model.temperature "${MODEL_TEMP:-0.2}" >>"$LOG" 2>&1
+    hermes config set compression.enabled false >>"$LOG" 2>&1 || true
+    hermes config set auxiliary.compression.enabled false >>"$LOG" 2>&1 || true
+    hermes config set auxiliary.title_generation.enabled false >>"$LOG" 2>&1 || true
+    hermes config set auxiliary.background_review.enabled false >>"$LOG" 2>&1 || true
+    hermes config set approvals.mode smart >>"$LOG" 2>&1 || true
+    hermes config set approvals.timeout 300 >>"$LOG" 2>&1 || true
+    hermes config set slack.require_mention false >>"$LOG" 2>&1 || true
+    set_env HERMES_API_TIMEOUT 180
+    grep -q "$LOCAL_ID" "$HERMES_HOME/config.yaml" 2>/dev/null || die "Hermes config wasn't updated — see $LOG"
+    ok "Hermes pointed at $LOCAL_ID (Google Gemini, ${CTX} context, smart approvals, durable handoffs)"
+    return 0
+  fi
+
+  if [ "$BACKEND" = "openrouter" ]; then
+    hermes config set model.provider openrouter         >>"$LOG" 2>&1
+    hermes config set model.default "$LOCAL_ID"         >>"$LOG" 2>&1
+    hermes config set model.context_length "$CTX"       >>"$LOG" 2>&1
+    hermes config set model.temperature "${MODEL_TEMP:-0.2}" >>"$LOG" 2>&1
+    hermes config set provider_routing.sort throughput >>"$LOG" 2>&1 || true
+    hermes config set provider_routing.require_parameters true >>"$LOG" 2>&1 || true
+    hermes config set provider_routing.data_collection deny >>"$LOG" 2>&1 || true
+    hermes config set compression.enabled false >>"$LOG" 2>&1 || true
+    hermes config set auxiliary.compression.enabled false >>"$LOG" 2>&1 || true
+    hermes config set auxiliary.title_generation.enabled false >>"$LOG" 2>&1 || true
+    hermes config set auxiliary.background_review.enabled false >>"$LOG" 2>&1 || true
+    hermes config set approvals.mode smart >>"$LOG" 2>&1 || true
+    hermes config set approvals.timeout 300 >>"$LOG" 2>&1 || true
+    hermes config set slack.require_mention false >>"$LOG" 2>&1 || true
+    set_env HERMES_API_TIMEOUT 180
+    grep -q "$LOCAL_ID" "$HERMES_HOME/config.yaml" 2>/dev/null || die "Hermes config wasn't updated — see $LOG"
+    ok "Hermes pointed at $LOCAL_ID (OpenRouter, ${CTX} context, throughput routing, durable handoffs)"
+    return 0
+  fi
+
   # Provider must be set first: switching provider clears the old provider's base_url.
   if [ "$BACKEND" = lmstudio ]; then
     hermes config set model.provider lmstudio         >>"$LOG" 2>&1
@@ -626,23 +1229,23 @@ slack_workspace_ready() { # the app-creation page only works if the browser is s
   if yesno "Do you already have a Slack workspace you want to use?"; then
     info "A sign-in page will open. Sign in to that workspace ${B}in the browser${N}, then come back here."
     info "(If it shows your workspace already, just click it.)"
-    open "https://slack.com/signin"
+    open_url "https://slack.com/signin"
   else
     info "A page will open to create a free one: enter your email, type the code Slack emails you,"
     info "give the workspace any name (e.g. 'Home'), and skip inviting people / choosing a paid plan."
-    open "https://slack.com/get-started#/createnew"
+    open_url "https://slack.com/get-started#/createnew"
   fi
   pause
 }
 
 slack_guided() {
   slack_workspace_ready
-  pbcopy < "$MANIFEST"
+  copy_to_clipboard "$MANIFEST"
   echo; info "${B}A) Create the app${N} — the settings are already copied to your clipboard."
   info "   A web page will open. Click:  ${B}From a manifest${N} → pick your workspace → ${B}Next${N}"
   info "   (If your workspace isn't in the list, click ${B}Sign in to another workspace${N}, sign in, then come back to that page.)"
   info "   → click the ${B}JSON${N} tab, select everything in the box, paste (⌘V) → ${B}Next${N} → ${B}Create${N}"
-  open "https://api.slack.com/apps?new_app=1"; pause
+  open_url "https://api.slack.com/apps?new_app=1"; pause
 
   info "${B}B) Install it${N} — left sidebar: ${B}Install App${N} → ${B}Install to Workspace${N} → ${B}Allow${N}"
   info "   Then copy the ${B}Bot User OAuth Token${N} (starts with xoxb-)."
@@ -714,20 +1317,71 @@ doctor() {
   step "Doctor · checking everything (nothing will be changed)"
   info "Memory bounds: ${RAM_GB} GB physical RAM (Safe model budget: ${MAX_SAFE_RSS_GB} GB, OS reserve: ${SYSTEM_RESERVE_GB} GB)"
   have hermes && ok "hermes command found" || bad "hermes not installed"
-  if curl -s -m 3 localhost:1234/v1/models | grep -q "$LOCAL_ID"; then
+
+  local gemini_key
+  gemini_key="$(get_env GEMINI_API_KEY)"
+  [ -z "$gemini_key" ] && gemini_key="$(get_env GOOGLE_API_KEY)"
+  if [ -n "$gemini_key" ]; then
+    info "Checking Google Gemini API connection…"
+    local auth_res
+    auth_res="$(curl -s -m 10 "https://generativelanguage.googleapis.com/v1beta/models?key=$gemini_key" 2>/dev/null || true)"
+    if [ -n "$auth_res" ] && ! echo "$auth_res" | grep -qi "API_KEY_INVALID\|error"; then
+      ok "Google Gemini key active and verified"
+      BACKEND=gemini; BASE_URL="https://generativelanguage.googleapis.com/v1beta"
+      GEMINI_API_KEY="$gemini_key"
+      [ -z "${LOCAL_ID:-}" ] || [ "$LOCAL_ID" = "hermes-local" ] && LOCAL_ID="$(python3 -c "import yaml; print(yaml.safe_load(open('$HERMES_HOME/config.yaml')).get('model',{}).get('default','gemini-2.5-flash'))" 2>/dev/null || echo "gemini-2.5-flash")"
+    else
+      bad "Google Gemini key invalid or unreachable — check at https://aistudio.google.com"
+    fi
+    if [ -f "$HERMES_HOME/skills/thread-handoff/SKILL.md" ]; then
+      ok "Durable thread handoff skill active (replaces lossy compaction)"
+    else
+      warn "Durable thread handoff skill missing — run: bash $0 model"
+    fi
+  fi
+
+  local or_key
+  or_key="$(get_env OPENROUTER_API_KEY)"
+  if [ -n "$or_key" ]; then
+    info "Checking OpenRouter API connection…"
+    local auth_res key_label key_rem
+    auth_res="$(curl -s -m 10 -H "Authorization: Bearer $or_key" "https://openrouter.ai/api/v1/key" 2>/dev/null || true)"
+    key_label="$(echo "$auth_res" | json "d.get('data',{}).get('label')")"
+    key_rem="$(echo "$auth_res" | json "d.get('data',{}).get('limit_remaining')")"
+    if [ -n "$key_label" ]; then
+      if [ -n "$key_rem" ] && [ "$key_rem" != "None" ]; then
+        ok "OpenRouter key active ('${key_label}', remaining: \$${key_rem})"
+      else
+        ok "OpenRouter key active ('${key_label}')"
+      fi
+      BACKEND=openrouter; BASE_URL="https://openrouter.ai/api/v1"
+      [ -z "${LOCAL_ID:-}" ] || [ "$LOCAL_ID" = "hermes-local" ] && LOCAL_ID="$(python3 -c "import yaml; print(yaml.safe_load(open('$HERMES_HOME/config.yaml')).get('model',{}).get('default','z-ai/glm-5.3-flash'))" 2>/dev/null || echo "z-ai/glm-5.3-flash")"
+    else
+      bad "OpenRouter key invalid or unreachable — check at https://openrouter.ai/keys"
+    fi
+    if [ -f "$HERMES_HOME/skills/thread-handoff/SKILL.md" ]; then
+      ok "Durable thread handoff skill active (replaces lossy compaction)"
+    else
+      warn "Durable thread handoff skill missing — run: bash $0 model"
+    fi
+  fi
+
+  if curl -s -m 3 localhost:1234/v1/models 2>/dev/null | grep -q "$LOCAL_ID"; then
     ok "LM Studio is serving $LOCAL_ID"; BACKEND=lmstudio; BASE_URL="http://localhost:1234/v1"
     if have lms; then
       info "LM Studio active models:"
       lms ps 2>/dev/null | awk 'NR>1 {print "    · " $0}'
     fi
-  elif curl -s -m 3 localhost:11434/api/tags | grep -q "$LOCAL_ID"; then
+  elif curl -s -m 3 localhost:11434/api/tags 2>/dev/null | grep -q "$LOCAL_ID"; then
     ok "Ollama has $LOCAL_ID"; BACKEND=ollama; BASE_URL="http://localhost:11434/v1"
-    [ "$(launchctl getenv OLLAMA_FLASH_ATTENTION)" = 1 ] && ok "Ollama speed settings active" || bad "Ollama speed settings missing — run: bash $0 model"
+    [ "$(launchctl getenv OLLAMA_FLASH_ATTENTION 2>/dev/null)" = 1 ] && ok "Ollama speed settings active" || bad "Ollama speed settings missing — run: bash $0 model"
     ollama ps 2>/dev/null | awk 'NR>1 && /CPU/ {print "  \033[31m✘\033[0m model is partly running on CPU (out of GPU memory): " $0}'
-  else
+  elif [ "${BACKEND:-}" != "openrouter" ] && [ "${BACKEND:-}" != "gemini" ]; then
     bad "No model server is serving '$LOCAL_ID' — run: bash $0 model"
   fi
+
   [ -n "${BASE_URL:-}" ] && benchmark
+
   local b a; b="$(get_env SLACK_BOT_TOKEN)"; a="$(get_env SLACK_APP_TOKEN)"
   [ -n "$b" ] && validate_bot_token "$b" || bad "No working Slack bot token"
   [ -n "$a" ] && validate_app_token "$a" || bad "No working Slack app token"
@@ -735,14 +1389,109 @@ doctor() {
   have hermes && { hermes gateway status 2>&1 | tail -3; hermes doctor 2>&1 | tail -15; }
 }
 
+# ------------------------------------------------------------------ reset ---
+reset_hermes() {
+  step "Reset · Completely removing Hermes configuration and background services"
+  echo "    ${Y}! WARNING:${N} This will stop any running Hermes gateway,"
+  echo "    remove all saved Slack tokens, API keys, and settings in ~/.hermes,"
+  echo "    and unload local model LaunchAgents."
+  echo
+  if ! yesno "Are you sure you want to completely reset Hermes?"; then
+    info "Reset cancelled."
+    return 0
+  fi
+
+  info "Stopping and uninstalling Hermes gateway daemon…"
+  if have hermes; then
+    hermes gateway stop >>"$LOG" 2>&1 || true
+    hermes gateway uninstall >>"$LOG" 2>&1 || true
+  fi
+  pkill -f "hermes gateway" 2>/dev/null || true
+
+  info "Unloading and removing LaunchAgents…"
+  local plist
+  for plist in "$HOME/Library/LaunchAgents/com.hermes-easy."*.plist; do
+    if [ -f "$plist" ]; then
+      launchctl unload "$plist" 2>/dev/null || true
+      rm -f "$plist"
+    fi
+  done
+  for plist in "$HOME/Library/LaunchAgents/"*hermes*.plist; do
+    if [ -f "$plist" ]; then
+      launchctl unload "$plist" 2>/dev/null || true
+      rm -f "$plist"
+    fi
+  done
+
+  if have ollama; then
+    info "Cleaning up tuned local models in Ollama…"
+    ollama rm "$LOCAL_ID" >>"$LOG" 2>&1 || true
+    ollama rm "hermes-local" >>"$LOG" 2>&1 || true
+  fi
+
+  if [ -d "$HERMES_HOME" ]; then
+    info "Removing configuration directory ($HERMES_HOME)…"
+    rm -rf "$HERMES_HOME"
+  fi
+
+  if yesno "Would you also like to remove the 'hermes' command-line binary?"; then
+    rm -f "$HOME/.local/bin/hermes"
+    ok "Hermes CLI binary removed"
+  fi
+
+  ok "Reset complete! Your system is clean."
+  echo
+  info "To perform a fresh installation from scratch, run:"
+  info "  ${B}bash $0${N}"
+}
+
 # -------------------------------------------------------------------- main --
 preflight
 case "${1:-all}" in
   doctor) doctor;;
-  model)  detect_backend; pick_model; if [ "$BACKEND" = ollama ]; then tune_ollama; else tune_lmstudio; fi; benchmark; install_hermes;;
-  slack)  setup_slack;;
-  all)    detect_backend; pick_model; if [ "$BACKEND" = ollama ]; then tune_ollama; else tune_lmstudio; fi
-          benchmark; install_hermes; setup_slack
-          step "All done 🎉"; info "If anything stops working later, run:  ${B}bash $0 doctor${N}";;
-  *) echo "Usage: bash $0 [all|model|slack|doctor]";;
+  reset)  reset_hermes;;
+  model)
+    detect_backend
+    if [ "$BACKEND" = gemini ]; then
+      pick_gemini_preset
+      tune_gemini
+    elif [ "$BACKEND" = openrouter ]; then
+      pick_openrouter_preset
+      tune_openrouter
+    else
+      pick_model
+      if [ "$BACKEND" = ollama ]; then tune_ollama; else tune_lmstudio; fi
+    fi
+    benchmark
+    install_hermes
+    ;;
+  slack) setup_slack;;
+  all)
+    detect_backend
+    if [ "$BACKEND" = gemini ]; then
+      pick_gemini_preset
+      tune_gemini
+    elif [ "$BACKEND" = openrouter ]; then
+      pick_openrouter_preset
+      tune_openrouter
+    else
+      pick_model
+      if [ "$BACKEND" = ollama ]; then tune_ollama; else tune_lmstudio; fi
+    fi
+    benchmark
+    install_hermes
+    setup_slack
+    step "All done 🎉"
+    info "If anything stops working later, run:  ${B}bash $0 doctor${N}"
+    ;;
+  gcp)
+    local script_dir
+    script_dir="$(cd "$(dirname "$0")" && pwd)"
+    if [ -f "$script_dir/deploy-gcp.sh" ]; then
+      bash "$script_dir/deploy-gcp.sh" "$@"
+    else
+      curl -fsSL https://raw.githubusercontent.com/zenzig/hermes-setup-script/main/deploy-gcp.sh | bash
+    fi
+    ;;
+  *) echo "Usage: bash $0 [all|model|slack|doctor|reset|gcp]";;
 esac
