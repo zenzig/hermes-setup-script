@@ -540,8 +540,13 @@ hermes config set approvals.timeout 300 >/dev/null 2>&1 || true
 
 if [ -n "$TELEGRAM_BOT_TOKEN" ] || ([ -n "$SLACK_BOT" ] && [ -n "$SLACK_APP" ]); then
   echo "Installing and starting Hermes background gateway daemon…"
+  sudo loginctl enable-linger "\$USER" >/dev/null 2>&1 || true
   hermes gateway install >/dev/null 2>&1 || true
-  hermes gateway restart >/dev/null 2>&1 || hermes gateway start >/dev/null 2>&1 || true
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+  systemctl --user restart hermes-gateway >/dev/null 2>&1 || systemctl --user start hermes-gateway >/dev/null 2>&1 || {
+    nohup hermes gateway run > "\$HOME/.hermes/gateway.log" 2>&1 &
+    sleep 2
+  }
 fi
 EOF
 
@@ -680,8 +685,14 @@ SKILL_EOF
 
   if [ -n "$TELEGRAM_BOT_TOKEN" ] || ([ -n "$SLACK_BOT" ] && [ -n "$SLACK_APP" ]); then
     info "Installing and starting Hermes background gateway daemon…"
+    sudo loginctl enable-linger "$USER" >/dev/null 2>&1 || true
     hermes gateway install >/dev/null 2>&1 || true
-    hermes gateway restart >/dev/null 2>&1 || hermes gateway start >/dev/null 2>&1 || true
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+    systemctl --user restart hermes-gateway >/dev/null 2>&1 || systemctl --user start hermes-gateway >/dev/null 2>&1 || {
+      # Fallback to nohup backgrounding if systemd user session is unavailable
+      nohup hermes gateway run > "$HOME/.hermes/gateway.log" 2>&1 &
+      sleep 2
+    }
   fi
 
   echo
