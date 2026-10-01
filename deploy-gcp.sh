@@ -538,15 +538,20 @@ hermes config set auxiliary.background_review.enabled false >/dev/null 2>&1 || t
 hermes config set approvals.mode smart >/dev/null 2>&1 || true
 hermes config set approvals.timeout 300 >/dev/null 2>&1 || true
 
+export HERMES_NONINTERACTIVE=1
 if [ -n "$TELEGRAM_BOT_TOKEN" ] || ([ -n "$SLACK_BOT" ] && [ -n "$SLACK_APP" ]); then
   echo "Installing and starting Hermes background gateway daemon…"
   sudo loginctl enable-linger "\$USER" >/dev/null 2>&1 || true
-  hermes gateway install >/dev/null 2>&1 || true
+  timeout 10 hermes gateway install --non-interactive >/dev/null 2>&1 || true
   systemctl --user daemon-reload >/dev/null 2>&1 || true
-  systemctl --user restart hermes-gateway >/dev/null 2>&1 || systemctl --user start hermes-gateway >/dev/null 2>&1 || {
+  if systemctl --user start hermes-gateway >/dev/null 2>&1 || systemctl --user restart hermes-gateway >/dev/null 2>&1; then
+    echo "Gateway daemon started via systemd"
+  else
+    pkill -f "hermes gateway" >/dev/null 2>&1 || true
     nohup hermes gateway run > "\$HOME/.hermes/gateway.log" 2>&1 &
     sleep 2
-  }
+    echo "Gateway daemon running in background (nohup)"
+  fi
 fi
 EOF
 
@@ -683,16 +688,20 @@ SKILL_EOF
   hermes config set approvals.mode smart >/dev/null 2>&1 || true
   hermes config set approvals.timeout 300 >/dev/null 2>&1 || true
 
+  export HERMES_NONINTERACTIVE=1
   if [ -n "$TELEGRAM_BOT_TOKEN" ] || ([ -n "$SLACK_BOT" ] && [ -n "$SLACK_APP" ]); then
     info "Installing and starting Hermes background gateway daemon…"
     sudo loginctl enable-linger "$USER" >/dev/null 2>&1 || true
-    hermes gateway install >/dev/null 2>&1 || true
+    timeout 10 hermes gateway install --non-interactive >/dev/null 2>&1 || true
     systemctl --user daemon-reload >/dev/null 2>&1 || true
-    systemctl --user restart hermes-gateway >/dev/null 2>&1 || systemctl --user start hermes-gateway >/dev/null 2>&1 || {
-      # Fallback to nohup backgrounding if systemd user session is unavailable
+    if systemctl --user start hermes-gateway >/dev/null 2>&1 || systemctl --user restart hermes-gateway >/dev/null 2>&1; then
+      ok "Gateway daemon started via systemd"
+    else
+      pkill -f "hermes gateway" >/dev/null 2>&1 || true
       nohup hermes gateway run > "$HOME/.hermes/gateway.log" 2>&1 &
       sleep 2
-    }
+      ok "Gateway daemon running in background (nohup)"
+    fi
   fi
 
   echo
