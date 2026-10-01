@@ -583,10 +583,130 @@ verify_and_summary() {
   fi
 }
 
+# ----------------------------------------------------------- local on-VM bootstrap --
+bootstrap_local() {
+  step "Bootstrapping Hermes Agent on this Cloud VM"
+  if [ $(free -m 2>/dev/null | awk '/^Mem:/{print $2}') -lt 2000 ] && [ ! -f /swapfile ]; then
+    info "Configuring 2 GB swap space for 1 GB RAM instance…"
+    sudo fallocate -l 2G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048 2>/dev/null
+    sudo chmod 600 /swapfile
+    sudo mkswap /swapfile
+    sudo swapon /swapfile
+    echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
+    ok "Swap configured successfully."
+  fi
+
+  info "Installing prerequisites…"
+  sudo apt-get update -y >/dev/null 2>&1 || true
+  sudo apt-get install -y curl python3 python3-pip git jq >/dev/null 2>&1 || true
+
+  export PATH="$HOME/.local/bin:$PATH"
+  if ! command -v hermes >/dev/null 2>&1; then
+    info "Installing Hermes Agent…"
+    curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup >/dev/null 2>&1 || curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+  fi
+
+  mkdir -p "$HOME/.hermes/skills/thread-handoff" "$HOME/.hermes/handoffs"
+  touch "$HOME/.hermes/.env"
+  chmod 600 "$HOME/.hermes/.env"
+
+  cat > "$HOME/.hermes/skills/thread-handoff/SKILL.md" <<'SKILL_EOF'
+---
+name: thread-handoff
+description: Distil a long session into a durable, dated handoff file instead of lossy compaction.
+---
+# Thread Handoff (Hermes Agent)
+SKILL_EOF
+
+  if [ -n "${GEMINI_KEY:-}" ]; then
+    grep -v "^GEMINI_API_KEY=" "$HOME/.hermes/.env" > "$HOME/.hermes/.env.tmp" 2>/dev/null || true
+    echo "GEMINI_API_KEY=$GEMINI_KEY" >> "$HOME/.hermes/.env.tmp"
+    echo "GOOGLE_API_KEY=$GEMINI_KEY" >> "$HOME/.hermes/.env.tmp"
+    mv "$HOME/.hermes/.env.tmp" "$HOME/.hermes/.env"; chmod 600 "$HOME/.hermes/.env"
+  fi
+
+  if [ -n "${OPENROUTER_KEY:-}" ]; then
+    grep -v "^OPENROUTER_API_KEY=" "$HOME/.hermes/.env" > "$HOME/.hermes/.env.tmp" 2>/dev/null || true
+    echo "OPENROUTER_API_KEY=$OPENROUTER_KEY" >> "$HOME/.hermes/.env.tmp"
+    mv "$HOME/.hermes/.env.tmp" "$HOME/.hermes/.env"; chmod 600 "$HOME/.hermes/.env"
+  fi
+
+  if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+    grep -v "^TELEGRAM_BOT_TOKEN=" "$HOME/.hermes/.env" > "$HOME/.hermes/.env.tmp" 2>/dev/null || true
+    echo "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN" >> "$HOME/.hermes/.env.tmp"
+    mv "$HOME/.hermes/.env.tmp" "$HOME/.hermes/.env"; chmod 600 "$HOME/.hermes/.env"
+  fi
+
+  if [ -n "${TELEGRAM_USER:-}" ]; then
+    grep -v "^TELEGRAM_ALLOWED_USERS=" "$HOME/.hermes/.env" > "$HOME/.hermes/.env.tmp" 2>/dev/null || true
+    echo "TELEGRAM_ALLOWED_USERS=$TELEGRAM_USER" >> "$HOME/.hermes/.env.tmp"
+    mv "$HOME/.hermes/.env.tmp" "$HOME/.hermes/.env"; chmod 600 "$HOME/.hermes/.env"
+  fi
+
+  if [ -n "${SLACK_BOT:-}" ]; then
+    grep -v "^SLACK_BOT_TOKEN=" "$HOME/.hermes/.env" > "$HOME/.hermes/.env.tmp" 2>/dev/null || true
+    echo "SLACK_BOT_TOKEN=$SLACK_BOT" >> "$HOME/.hermes/.env.tmp"
+    mv "$HOME/.hermes/.env.tmp" "$HOME/.hermes/.env"; chmod 600 "$HOME/.hermes/.env"
+  fi
+
+  if [ -n "${SLACK_APP:-}" ]; then
+    grep -v "^SLACK_APP_TOKEN=" "$HOME/.hermes/.env" > "$HOME/.hermes/.env.tmp" 2>/dev/null || true
+    echo "SLACK_APP_TOKEN=$SLACK_APP" >> "$HOME/.hermes/.env.tmp"
+    mv "$HOME/.hermes/.env.tmp" "$HOME/.hermes/.env"; chmod 600 "$HOME/.hermes/.env"
+  fi
+
+  if [ -n "${SLACK_USER:-}" ]; then
+    grep -v "^SLACK_ALLOWED_USERS=" "$HOME/.hermes/.env" > "$HOME/.hermes/.env.tmp" 2>/dev/null || true
+    echo "SLACK_ALLOWED_USERS=$SLACK_USER" >> "$HOME/.hermes/.env.tmp"
+    mv "$HOME/.hermes/.env.tmp" "$HOME/.hermes/.env"; chmod 600 "$HOME/.hermes/.env"
+  fi
+
+  export PATH="$HOME/.local/bin:$PATH"
+  hermes config set model.provider $PROVIDER >/dev/null 2>&1 || true
+  hermes config set model.default $MODEL_NAME >/dev/null 2>&1 || true
+  if [ "$PROVIDER" = "gemini" ]; then
+    hermes config set model.context_length 1000000 >/dev/null 2>&1 || true
+  else
+    hermes config set model.context_length 128000 >/dev/null 2>&1 || true
+    hermes config set provider_routing.sort throughput >/dev/null 2>&1 || true
+  fi
+  hermes config set model.temperature 0.2 >/dev/null 2>&1 || true
+  hermes config set compression.enabled false >/dev/null 2>&1 || true
+  hermes config set auxiliary.compression.enabled false >/dev/null 2>&1 || true
+  hermes config set auxiliary.title_generation.enabled false >/dev/null 2>&1 || true
+  hermes config set auxiliary.background_review.enabled false >/dev/null 2>&1 || true
+  hermes config set approvals.mode smart >/dev/null 2>&1 || true
+  hermes config set approvals.timeout 300 >/dev/null 2>&1 || true
+
+  if [ -n "$TELEGRAM_BOT_TOKEN" ] || ([ -n "$SLACK_BOT" ] && [ -n "$SLACK_APP" ]); then
+    info "Installing and starting Hermes background gateway daemon…"
+    hermes gateway install >/dev/null 2>&1 || true
+    hermes gateway restart >/dev/null 2>&1 || hermes gateway start >/dev/null 2>&1 || true
+  fi
+
+  echo
+  ok "Hermes 24/7 Always-Free Cloud Agent is live on this VM!"
+  if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+    ok "Telegram gateway is active! Open Telegram on your phone and send a message to your bot."
+  elif [ -n "${SLACK_BOT:-}" ]; then
+    ok "Slack gateway is active! Test it by sending a DM to your bot in Slack."
+  else
+    info "No chat platform configured. You can use Hermes directly via 'hermes chat'."
+  fi
+}
+
 # ----------------------------------------------------------------------- main --
 echo "${B}${C}╔═══════════════════════════════════════════════════════════════════════╗${N}"
 echo "${B}${C}║   Hermes Agent — Google Cloud Always-Free 24/7 Auto-Deployer          ║${N}"
 echo "${B}${C}╚═══════════════════════════════════════════════════════════════════════╝${N}"
+
+# Auto-detect if already running directly on the cloud VM
+if [ "$(hostname 2>/dev/null)" = "$INSTANCE_NAME" ] || [ "${1:-}" = "local" ]; then
+  gather_credentials
+  bootstrap_local
+  exit 0
+fi
+
 check_gcloud
 auth_and_project
 pick_zone
