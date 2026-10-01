@@ -38,7 +38,7 @@ LMS_HAS_MLX=0
 
 # Google AI Studio / Gemini Presets: option | label | slug | context_length | temp
 GEMINI_PRESETS='
-1|Gemini 2.5 Flash (Recommended: 100% Free tier API, high-speed, 1M context)|gemini-2.5-flash|1000000|0.2
+1|Gemini 3.8 Flash (Recommended: frontier speed, 1M context, ultra-cheap)|gemini-3.8-flash|1000000|0.2
 2|Gemini 2.5 Pro (Deep reasoning, complex workflows & agent tool use)|gemini-2.5-pro|1000000|0.2
 3|Gemini 1.5 Flash (Fast, reliable legacy tier)|gemini-1.5-flash|1000000|0.2
 '
@@ -565,8 +565,8 @@ EOF
     pick="${pick:-1}"
     case "$pick" in
       1)
-        MODEL_LABEL="Gemini 2.5 Flash"
-        MODEL_TAG="gemini-2.5-flash"
+        MODEL_LABEL="Gemini 3.8 Flash"
+        MODEL_TAG="gemini-3.8-flash"
         CTX=1000000
         MODEL_TEMP=0.2
         ;;
@@ -584,16 +584,16 @@ EOF
         ;;
       4|custom|Custom)
         local custom_slug
-        custom_slug="$(trim "$(ask "Enter Gemini model identifier (e.g. gemini-2.5-flash):")")"
-        [ -z "$custom_slug" ] && custom_slug="gemini-2.5-flash"
+        custom_slug="$(trim "$(ask "Enter Gemini model identifier (e.g. gemini-3.8-flash):")")"
+        [ -z "$custom_slug" ] && custom_slug="gemini-3.8-flash"
         MODEL_LABEL="Custom ($custom_slug)"
         MODEL_TAG="$custom_slug"
         CTX=1000000
         MODEL_TEMP=0.2
         ;;
       *)
-        MODEL_LABEL="Gemini 2.5 Flash"
-        MODEL_TAG="gemini-2.5-flash"
+        MODEL_LABEL="Gemini 3.8 Flash"
+        MODEL_TAG="gemini-3.8-flash"
         CTX=1000000
         MODEL_TEMP=0.2
         ;;
@@ -1348,7 +1348,7 @@ doctor() {
       ok "Google Gemini key active and verified"
       BACKEND=gemini; BASE_URL="https://generativelanguage.googleapis.com/v1beta"
       GEMINI_API_KEY="$gemini_key"
-      [ -z "${LOCAL_ID:-}" ] || [ "$LOCAL_ID" = "hermes-local" ] && LOCAL_ID="$(python3 -c "import yaml; print(yaml.safe_load(open('$HERMES_HOME/config.yaml')).get('model',{}).get('default','gemini-2.5-flash'))" 2>/dev/null || echo "gemini-2.5-flash")"
+      [ -z "${LOCAL_ID:-}" ] || [ "$LOCAL_ID" = "hermes-local" ] && LOCAL_ID="$(python3 -c "import yaml; print(yaml.safe_load(open('$HERMES_HOME/config.yaml')).get('model',{}).get('default','gemini-3.8-flash'))" 2>/dev/null || echo "gemini-3.8-flash")"
     else
       bad "Google Gemini key invalid or unreachable — check at https://aistudio.google.com"
     fi

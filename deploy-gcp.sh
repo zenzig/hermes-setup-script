@@ -26,7 +26,7 @@ IMAGE_PROJECT="ubuntu-os-cloud"
 DEFAULT_ZONE="us-central1-a"
 ZONE="$DEFAULT_ZONE"
 PROVIDER="gemini"
-MODEL_NAME="gemini-2.5-flash"
+MODEL_NAME="gemini-3.8-flash"
 GEMINI_KEY=""
 OPENROUTER_KEY=""
 CHAT_PLATFORM="telegram"
@@ -210,7 +210,7 @@ pick_zone() {
 gather_credentials() {
   step "Step 4 · Credentials & Model Configuration"
   PROVIDER="gemini"
-  MODEL_NAME="gemini-2.5-flash"
+  MODEL_NAME="gemini-3.8-flash"
   GEMINI_KEY=""
   OPENROUTER_KEY=""
   SLACK_BOT=""
@@ -230,7 +230,7 @@ gather_credentials() {
       ;;
     *)
       PROVIDER="gemini"
-      MODEL_NAME="gemini-2.5-flash"
+      MODEL_NAME="gemini-3.8-flash"
       ;;
   esac
 
