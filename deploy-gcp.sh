@@ -29,6 +29,9 @@ PROVIDER="gemini"
 MODEL_NAME="gemini-2.5-flash"
 GEMINI_KEY=""
 OPENROUTER_KEY=""
+CHAT_PLATFORM="telegram"
+TELEGRAM_BOT_TOKEN=""
+TELEGRAM_USER=""
 SLACK_BOT=""
 SLACK_APP=""
 SLACK_USER=""
@@ -266,32 +269,75 @@ gather_credentials() {
     ok "OpenRouter API Key ready"
   fi
 
-  # Slack credentials
-  local local_bot="" local_app="" local_user=""
-  local_bot="$(get_local_env SLACK_BOT_TOKEN)"
-  local_app="$(get_local_env SLACK_APP_TOKEN)"
-  local_user="$(get_local_env SLACK_ALLOWED_USERS)"
-  if [ -n "$local_bot" ] && [ -n "$local_app" ]; then
-    echo
-    if yesno "Found existing Slack connection tokens in local ~/.hermes/.env. Migrate them to the cloud VM?"; then
-      SLACK_BOT="$local_bot"
-      SLACK_APP="$local_app"
-      SLACK_USER="$local_user"
-      warn "Remember to stop your local Mac gateway daemon ('hermes gateway stop') once the cloud VM starts,"
-      warn "so the two instances do not compete for the same Slack Socket Mode events."
-    fi
-  fi
+  # Chat Platform credentials
+  echo
+  info "Select chat platform to connect to your 24/7 Hermes VM:"
+  echo "    ${B}1)${N} Telegram ${G}(Recommended: 1 single token from @BotFather, 30-sec setup)${N}"
+  echo "    ${B}2)${N} Slack    ${C}(Requires Slack App, Bot token, App-level token)${N}"
+  echo "    ${B}3)${N} Skip / CLI only (Interact directly via SSH terminal)${N}"
+  echo
+  local chat_pick
+  chat_pick="$(ask "Select platform [1-3, default: 1]:")"
+  case "${chat_pick:-1}" in
+    2|slack|Slack)
+      CHAT_PLATFORM="slack"
+      ;;
+    3|none|skip|cli)
+      CHAT_PLATFORM="none"
+      ;;
+    *)
+      CHAT_PLATFORM="telegram"
+      ;;
+  esac
 
-  if [ -z "$SLACK_BOT" ]; then
-    echo
-    info "Would you like to configure Slack tokens now, or configure them later via SSH?"
-    if yesno "Configure Slack tokens now?"; then
-      SLACK_BOT="$(trim "$(ask "Paste Slack Bot User OAuth Token (xoxb-):")")"
-      SLACK_APP="$(trim "$(ask "Paste Slack App-Level Token (xapp-):")")"
-      SLACK_USER="$(trim "$(ask "Your Slack User ID (optional, press Enter to allow all):")")"
-    else
-      info "You can configure Slack later by running:  gcloud compute ssh $INSTANCE_NAME --zone=$ZONE"
+  if [ "$CHAT_PLATFORM" = "telegram" ]; then
+    local local_tg="" local_tg_user=""
+    local_tg="$(get_local_env TELEGRAM_BOT_TOKEN)"
+    local_tg_user="$(get_local_env TELEGRAM_ALLOWED_USERS)"
+    if [ -n "$local_tg" ]; then
+      echo
+      if yesno "Found Telegram bot token in local ~/.hermes/.env. Use this token on the cloud VM?"; then
+        TELEGRAM_BOT_TOKEN="$local_tg"
+        TELEGRAM_USER="$local_tg_user"
+      fi
     fi
+    while [ -z "$TELEGRAM_BOT_TOKEN" ]; do
+      echo
+      info "Enter your ${B}Telegram Bot Token${N} (from @BotFather, e.g. 7123456789:AAH...):"
+      TELEGRAM_BOT_TOKEN="$(trim "$(ask "Telegram Bot Token:")")"
+      [ -z "$TELEGRAM_BOT_TOKEN" ] && bad "Token cannot be empty."
+    done
+    TELEGRAM_USER="$(trim "$(ask "Your numeric Telegram User ID (optional, press Enter to allow first user/pairing):")")"
+    ok "Telegram configuration ready"
+  elif [ "$CHAT_PLATFORM" = "slack" ]; then
+    local local_bot="" local_app="" local_user=""
+    local_bot="$(get_local_env SLACK_BOT_TOKEN)"
+    local_app="$(get_local_env SLACK_APP_TOKEN)"
+    local_user="$(get_local_env SLACK_ALLOWED_USERS)"
+    if [ -n "$local_bot" ] && [ -n "$local_app" ]; then
+      echo
+      if yesno "Found existing Slack connection tokens in local ~/.hermes/.env. Migrate them to the cloud VM?"; then
+        SLACK_BOT="$local_bot"
+        SLACK_APP="$local_app"
+        SLACK_USER="$local_user"
+        warn "Remember to stop your local Mac gateway daemon ('hermes gateway stop') once the cloud VM starts,"
+        warn "so the two instances do not compete for the same Slack Socket Mode events."
+      fi
+    fi
+
+    if [ -z "$SLACK_BOT" ]; then
+      echo
+      info "Would you like to configure Slack tokens now, or configure them later via SSH?"
+      if yesno "Configure Slack tokens now?"; then
+        SLACK_BOT="$(trim "$(ask "Paste Slack Bot User OAuth Token (xoxb-):")")"
+        SLACK_APP="$(trim "$(ask "Paste Slack App-Level Token (xapp-):")")"
+        SLACK_USER="$(trim "$(ask "Your Slack User ID (optional, press Enter to allow all):")")"
+      else
+        info "You can configure Slack later by running:  gcloud compute ssh $INSTANCE_NAME --zone=$ZONE"
+      fi
+    fi
+  else
+    info "Skipping chat platform. You can chat with Hermes directly via SSH."
   fi
 }
 
@@ -433,6 +479,22 @@ mv "\$HOME/.hermes/.env.tmp" "\$HOME/.hermes/.env"; chmod 600 "\$HOME/.hermes/.e
 EOF
   fi
 
+  if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+    cat >> "$remote_script" <<EOF
+grep -v "^TELEGRAM_BOT_TOKEN=" "\$HOME/.hermes/.env" > "\$HOME/.hermes/.env.tmp" 2>/dev/null || true
+echo "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN" >> "\$HOME/.hermes/.env.tmp"
+mv "\$HOME/.hermes/.env.tmp" "\$HOME/.hermes/.env"; chmod 600 "\$HOME/.hermes/.env"
+EOF
+  fi
+
+  if [ -n "${TELEGRAM_USER:-}" ]; then
+    cat >> "$remote_script" <<EOF
+grep -v "^TELEGRAM_ALLOWED_USERS=" "\$HOME/.hermes/.env" > "\$HOME/.hermes/.env.tmp" 2>/dev/null || true
+echo "TELEGRAM_ALLOWED_USERS=$TELEGRAM_USER" >> "\$HOME/.hermes/.env.tmp"
+mv "\$HOME/.hermes/.env.tmp" "\$HOME/.hermes/.env"; chmod 600 "\$HOME/.hermes/.env"
+EOF
+  fi
+
   if [ -n "${SLACK_BOT:-}" ]; then
     cat >> "$remote_script" <<EOF
 grep -v "^SLACK_BOT_TOKEN=" "\$HOME/.hermes/.env" > "\$HOME/.hermes/.env.tmp" 2>/dev/null || true
@@ -476,7 +538,7 @@ hermes config set auxiliary.background_review.enabled false >/dev/null 2>&1 || t
 hermes config set approvals.mode smart >/dev/null 2>&1 || true
 hermes config set approvals.timeout 300 >/dev/null 2>&1 || true
 
-if [ -n "$SLACK_BOT" ] && [ -n "$SLACK_APP" ]; then
+if [ -n "$TELEGRAM_BOT_TOKEN" ] || ([ -n "$SLACK_BOT" ] && [ -n "$SLACK_APP" ]); then
   echo "Installing and starting Hermes background gateway daemon…"
   hermes gateway install >/dev/null 2>&1 || true
   hermes gateway restart >/dev/null 2>&1 || hermes gateway start >/dev/null 2>&1 || true
@@ -512,10 +574,12 @@ verify_and_summary() {
   info "  Stop instance:       ${B}gcloud compute instances stop ${INSTANCE_NAME} --zone=${ZONE}${N}"
   info "  Start instance:      ${B}gcloud compute instances start ${INSTANCE_NAME} --zone=${ZONE}${N}"
   echo
-  if [ -n "${SLACK_BOT:-}" ]; then
+  if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+    ok "Telegram gateway is active! Open Telegram on your phone and send a message to your bot."
+  elif [ -n "${SLACK_BOT:-}" ]; then
     ok "Slack gateway is active! Test it by sending a DM to your bot in Slack."
   else
-    info "To connect Slack, run: ${B}gcloud compute ssh ${INSTANCE_NAME} --zone=${ZONE}${N} followed by ${B}hermes slack setup${N}"
+    info "No chat platform configured. You can use Hermes directly via SSH."
   fi
 }
 
