@@ -126,8 +126,42 @@ If you do not want to install anything on your Mac, use Google's free in-browser
 1. Open **[Google Cloud Shell](https://shell.cloud.google.com)**.
 2. Paste and run this one-liner:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/zenzig/hermes-setup-script/main/deploy-gcp.sh | bash
+curl -fsSL https://raw.githubusercontent.com/zenzig/hermes-setup-script/main/deploy-gcp.sh -o deploy.sh && bash deploy.sh
 ```
+
+---
+
+## API Quotas & Cost Breakdown (Free vs. Pay-As-You-Go)
+
+### 1. Google Cloud VM Infrastructure: $0.00 / month (Always Free)
+* **Compute Engine**: `e2-micro` (2 vCPUs, 1 GB RAM) is covered 100% under Google Cloud's "Always Free" tier (744 pooled hours/month in `us-central1`, `us-west1`, or `us-east1`).
+* **Disk**: 30 GB standard persistent disk (`pd-standard`) is also 100% $0.00/month.
+* **Swap Space**: The script automatically provisions 2 GB of swap space so Hermes runs smoothly in 1 GB RAM without out-of-memory errors.
+
+### 2. AI Model API: Free Tier Quotas vs. Paid Plan (~$0.25 – $1.50 / month)
+
+#### The Free Tier Caveat (15 Requests/Minute)
+Google AI Studio offers a free tier for Gemini API keys. However:
+* It has a strict quota of **15 Requests Per Minute (RPM)**.
+* Because Hermes is an **autonomous agent** that runs multi-step tool loops (analyzing → running bash commands → checking files → evaluating results), a single complex user task can trigger 3–10 internal LLM calls in rapid succession.
+* On pure free accounts, this can trigger `HTTP 429 RESOURCE_EXHAUSTED` rate-limit errors during active agent sessions.
+
+#### Upgrading to Pay-As-You-Go (Recommended)
+Upgrading your Google Cloud project to Pay-As-You-Go immediately unlocks **1,000+ RPM** with zero throttling:
+
+| Resource | Free Tier | Pay-As-You-Go Plan | Approximate Monthly Cost |
+| :--- | :--- | :--- | :--- |
+| **VM Infrastructure** | `e2-micro` (30GB disk) | `e2-micro` (30GB disk) | **$0.00** (Always Free) |
+| **API Rate Limit** | 15 RPM (throttled) | 1,000+ RPM (unthrottled) | — |
+| **Gemini Flash API** | 15 RPM / 1,500 RPD | $0.075 / 1,000,000 input tokens | **~$0.25 – $1.50 / month** |
+
+* A typical active user (~15–30 tasks/day) uses roughly 50,000–200,000 tokens/day.
+* At $0.075 per 1M tokens, adding a **$10 or $20 credit balance** to your Google account powers Hermes for **6 to 12+ months**!
+
+#### How to Add Payment to your Account
+1. Open **[Google AI Studio Plan Settings](https://aistudio.google.com/app/plan_information)** (or [Google Cloud Billing](https://console.cloud.google.com/billing)).
+2. Click **"Set up billing"** or **"Upgrade to Pay-as-you-go"** on your project and link a payment method.
+3. Your existing API keys automatically inherit the upgraded 1,000+ RPM limits within minutes—no key regeneration or server restarts needed.
 
 ---
 

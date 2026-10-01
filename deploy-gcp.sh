@@ -218,8 +218,8 @@ gather_credentials() {
   SLACK_USER=""
 
   echo "    Select the cloud AI engine for your Always-Free VM:"
-  echo "      ${B}1)${N} Google AI Studio / Gemini ${G}(Recommended: 100% Free Tier API, 1M context, \$0/mo)${N}"
-  echo "      ${B}2)${N} OpenRouter Cloud ${C}(BYOK: access to GLM-5.3, DeepSeek, GPT-6 Luna, etc.)${N}"
+  echo "      ${B}1)${N} Google AI Studio / Gemini ${G}(Free Tier or Pay-as-You-Go, 1M context, ultra-cheap)${N}"
+  echo "      ${B}2)${N} OpenRouter Cloud ${C}(BYOK: access to DeepSeek, Qwen Coder, Llama 3.3, etc.)${N}"
   echo
   local be_pick
   be_pick="$(ask "Select engine [1 or 2, default: 1]:")"
@@ -235,6 +235,30 @@ gather_credentials() {
   esac
 
   if [ "$PROVIDER" = "gemini" ]; then
+    echo
+    info "${C}━━ Google Gemini Quota & Pricing Guidance ━━${N}"
+    info "  • ${Y}Free Tier Quota Warning (15 RPM):${N}"
+    info "    Google AI Studio's Free Tier has a strict limit of ${B}15 Requests Per Minute (RPM)${N}."
+    info "    Because Hermes is an autonomous agent executing multi-step tool loops"
+    info "    (reasoning → bash commands → file inspection → reply), a single user prompt"
+    info "    can make 3–10 API calls in seconds. On pure free accounts, this quickly triggers"
+    info "    rate-limit errors (HTTP 429 / RESOURCE_EXHAUSTED)."
+    echo
+    info "  • ${G}Recommended Pay-As-You-Go Plan (approx. \$0.25 – \$1.50 / month):${N}"
+    info "    Linking a payment card to your Google AI Studio project upgrades your limit"
+    info "    instantly from ${B}15 RPM to 1,000+ RPM${N} with zero throttling!"
+    info "    - VM Infrastructure Cost: Still ${B}\$0.00/mo Always Free${N} (e2-micro + 30GB disk)."
+    info "    - Gemini Flash API Pricing: Only ${B}\$0.075 per 1,000,000 input tokens${N}."
+    info "    - Running Hermes actively (~15–30 tasks/day) costs roughly ${B}\$0.50 to \$1.00 per month${N}."
+    info "    - Adding a \$10 or \$20 credit balance easily covers 6–12+ months of heavy use."
+    echo
+    info "  • ${B}How to Add Payment to your Account:${N}"
+    info "    1. Open: ${B}https://aistudio.google.com/app/plan_information${N}"
+    info "       (or https://console.cloud.google.com/billing)"
+    info "    2. Click 'Set up billing' or 'Upgrade to Pay-as-you-go' on your project."
+    info "    3. Existing API keys automatically upgrade to 1,000 RPM (no key changes needed)."
+    echo
+
     local local_gkey=""
     local_gkey="$(get_local_env GEMINI_API_KEY)"
     [ -z "$local_gkey" ] && local_gkey="$(get_local_env GOOGLE_API_KEY)"
@@ -246,12 +270,19 @@ gather_credentials() {
     while [ -z "$GEMINI_KEY" ]; do
       echo
       info "Enter your ${B}Google Gemini API Key${N} (starts with 'AIzaSy...'):"
-      info "Get or view free keys at: https://aistudio.google.com"
+      info "Get or view keys at: https://aistudio.google.com/app/apikey"
       GEMINI_KEY="$(trim "$(ask "Gemini API Key:")")"
       [ -z "$GEMINI_KEY" ] && bad "Key cannot be empty."
     done
     ok "Gemini API Key ready"
   else
+    echo
+    info "${C}━━ OpenRouter Quota & Pricing Guidance ━━${N}"
+    info "  • Free models (:free) have shared pool limits (~20 RPM) that may queue under high load."
+    info "  • Depositing \$5 at ${B}https://openrouter.ai/credits${N} unlocks top models"
+    info "    (Qwen 2.5 Coder, Llama 3.3, DeepSeek) at high throughput for pennies a month."
+    echo
+
     local local_orkey=""
     local_orkey="$(get_local_env OPENROUTER_API_KEY)"
     if [ -n "$local_orkey" ]; then
@@ -591,6 +622,17 @@ verify_and_summary() {
   else
     info "No chat platform configured. You can use Hermes directly via SSH."
   fi
+  echo
+  info "${B}Cost & Quota Summary for this Setup:${N}"
+  info "  · Cloud VM:     Always Free (\$0.00/month forever on GCP e2-micro)"
+  info "  · AI Engine:    ${PROVIDER} (${MODEL_NAME})"
+  if [ "$PROVIDER" = "gemini" ]; then
+    info "  · Free Quota:   15 RPM (can trigger 429 during multi-step tool loops)"
+    info "  · Paid Quota:   1,000+ RPM (~$0.25 - $1.50/month with zero throttling)"
+    info "  · Add Billing:  https://aistudio.google.com/app/plan_information"
+  else
+    info "  · Add Credits:  https://openrouter.ai/credits (\$5 minimum lasts months)"
+  fi
 }
 
 # ----------------------------------------------------------- local on-VM bootstrap --
@@ -712,6 +754,17 @@ SKILL_EOF
     ok "Slack gateway is active! Test it by sending a DM to your bot in Slack."
   else
     info "No chat platform configured. You can use Hermes directly via 'hermes chat'."
+  fi
+  echo
+  info "${B}Cost & Quota Summary for this Setup:${N}"
+  info "  · Cloud VM:     Always Free (\$0.00/month forever on GCP e2-micro)"
+  info "  · AI Engine:    ${PROVIDER} (${MODEL_NAME})"
+  if [ "$PROVIDER" = "gemini" ]; then
+    info "  · Free Quota:   15 RPM (can trigger 429 during multi-step tool loops)"
+    info "  · Paid Quota:   1,000+ RPM (~$0.25 - $1.50/month with zero throttling)"
+    info "  · Add Billing:  https://aistudio.google.com/app/plan_information"
+  else
+    info "  · Add Credits:  https://openrouter.ai/credits (\$5 minimum lasts months)"
   fi
 }
 

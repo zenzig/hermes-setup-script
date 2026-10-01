@@ -490,8 +490,27 @@ validate_gemini_key() {
   while :; do
     if [ -z "$key" ]; then
       echo
+      info "${C}━━ Google Gemini Quota & Pricing Guidance ━━${N}"
+      info "  • ${Y}Free Tier Quota Warning (15 RPM):${N}"
+      info "    Google AI Studio's Free Tier has a strict limit of ${B}15 Requests Per Minute (RPM)${N}."
+      info "    Because Hermes is an autonomous agent executing multi-step tool loops"
+      info "    (reasoning → bash commands → file inspection → reply), complex requests can make"
+      info "    3–10 API calls in seconds, triggering rate-limit errors (429 / RESOURCE_EXHAUSTED)."
+      echo
+      info "  • ${G}Recommended Pay-As-You-Go Upgrade (approx. \$0.25 – \$1.50 / month):${N}"
+      info "    Linking a payment card upgrades your limit to ${B}1,000+ RPM${N} with zero throttling!"
+      info "    - Gemini Flash API Pricing: Only ${B}\$0.075 per 1,000,000 input tokens${N}."
+      info "    - Typical Hermes agent use (~15–30 tasks/day) costs roughly ${B}\$0.50 to \$1.00 per month${N}."
+      info "    - Adding a \$10 or \$20 credit balance easily covers 6–12+ months of heavy use."
+      echo
+      info "  • ${B}How to Add Payment to your Account:${N}"
+      info "    1. Open: ${B}https://aistudio.google.com/app/plan_information${N}"
+      info "       (or https://console.cloud.google.com/billing)"
+      info "    2. Click 'Set up billing' or 'Upgrade to Pay-as-you-go' on your project."
+      info "    3. Existing API keys automatically upgrade to 1,000 RPM (no key changes needed)."
+      echo
       info "${B}Enter your Google Gemini API Key${N} (starts with 'AIzaSy...'):"
-      info "Get or view free keys at: https://aistudio.google.com"
+      info "Get or view keys at: https://aistudio.google.com/app/apikey"
       key="$(trim "$(ask "Gemini API Key:")")"
     fi
 
